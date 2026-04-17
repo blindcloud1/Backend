@@ -114,6 +114,42 @@ services:
     networks:
       - blindscloud-net
 
+  products-service:
+    build:
+      context: .
+      dockerfile: services/products-service/Dockerfile
+    container_name: blindscloud-products-service
+    restart: unless-stopped
+    environment:
+      PORT: 4006
+      JWT_SECRET: ${JWT_SECRET:-dev-secret-change}
+      MONGO_URL: ${MONGO_URL:-mongodb://${MONGO_ROOT_USER:-admin}:${MONGO_ROOT_PASSWORD:-change-me}@mongo:27017/admin}
+      RABBITMQ_URL: ${RABBITMQ_URL:-amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-change-me}@rabbitmq:5672}
+      EVENT_EXCHANGE: ${EVENT_EXCHANGE:-blindscloud.events}
+    depends_on:
+      - mongo
+      - rabbitmq
+    networks:
+      - blindscloud-net
+
+  pricing-service:
+    build:
+      context: .
+      dockerfile: services/pricing-service/Dockerfile
+    container_name: blindscloud-pricing-service
+    restart: unless-stopped
+    environment:
+      PORT: 4007
+      JWT_SECRET: ${JWT_SECRET:-dev-secret-change}
+      MONGO_URL: ${MONGO_URL:-mongodb://${MONGO_ROOT_USER:-admin}:${MONGO_ROOT_PASSWORD:-change-me}@mongo:27017/admin}
+      RABBITMQ_URL: ${RABBITMQ_URL:-amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-change-me}@rabbitmq:5672}
+      EVENT_EXCHANGE: ${EVENT_EXCHANGE:-blindscloud.events}
+    depends_on:
+      - mongo
+      - rabbitmq
+    networks:
+      - blindscloud-net
+
   api-gateway:
     build:
       context: .
@@ -128,6 +164,8 @@ services:
       BUSINESSES_SERVICE_URL: http://businesses-service:4003
       CUSTOMERS_SERVICE_URL: http://customers-service:4004
       JOBS_SERVICE_URL: http://jobs-service:4005
+      PRODUCTS_SERVICE_URL: http://products-service:4006
+      PRICING_SERVICE_URL: http://pricing-service:4007
     ports:
       - "3001:3001"
     depends_on:
@@ -136,6 +174,8 @@ services:
       - businesses-service
       - customers-service
       - jobs-service
+      - products-service
+      - pricing-service
     networks:
       - blindscloud-net
 

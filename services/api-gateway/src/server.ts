@@ -13,6 +13,8 @@ const USERS_SERVICE_URL = process.env.USERS_SERVICE_URL || 'http://localhost:400
 const BUSINESSES_SERVICE_URL = process.env.BUSINESSES_SERVICE_URL || 'http://localhost:4003';
 const CUSTOMERS_SERVICE_URL = process.env.CUSTOMERS_SERVICE_URL || 'http://localhost:4004';
 const JOBS_SERVICE_URL = process.env.JOBS_SERVICE_URL || 'http://localhost:4005';
+const PRODUCTS_SERVICE_URL = process.env.PRODUCTS_SERVICE_URL || 'http://localhost:4006';
+const PRICING_SERVICE_URL = process.env.PRICING_SERVICE_URL || 'http://localhost:4007';
 const CORS_ORIGINS = (process.env.CORS_ORIGINS || '').split(',').map(s => s.trim()).filter(Boolean);
 
 const app = express();
@@ -91,6 +93,36 @@ app.use(createProxyMiddleware({
   changeOrigin: true,
   pathFilter: '/api/jobs',
   pathRewrite: { '^/api/jobs': '/jobs' },
+  on: {
+    proxyReq: (proxyReq: ClientRequest, req: IncomingMessage, _res: ServerResponse) => {
+      const correlationId = req.headers['x-correlation-id'];
+      if (correlationId && typeof correlationId === 'string') {
+        proxyReq.setHeader('x-correlation-id', correlationId);
+      }
+    }
+  }
+}));
+
+app.use(createProxyMiddleware({
+  target: PRODUCTS_SERVICE_URL,
+  changeOrigin: true,
+  pathFilter: '/api/products',
+  pathRewrite: { '^/api/products': '/products' },
+  on: {
+    proxyReq: (proxyReq: ClientRequest, req: IncomingMessage, _res: ServerResponse) => {
+      const correlationId = req.headers['x-correlation-id'];
+      if (correlationId && typeof correlationId === 'string') {
+        proxyReq.setHeader('x-correlation-id', correlationId);
+      }
+    }
+  }
+}));
+
+app.use(createProxyMiddleware({
+  target: PRICING_SERVICE_URL,
+  changeOrigin: true,
+  pathFilter: '/api/pricing-tables',
+  pathRewrite: { '^/api/pricing-tables': '/pricing-tables' },
   on: {
     proxyReq: (proxyReq: ClientRequest, req: IncomingMessage, _res: ServerResponse) => {
       const correlationId = req.headers['x-correlation-id'];
