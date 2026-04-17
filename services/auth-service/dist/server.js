@@ -47,7 +47,8 @@ app.get('/health', async (_req, res) => {
         res.status(500).json({ status: 'ERROR', error: err?.message || String(err) });
     }
 });
-app.post('/auth/login', [(0, express_validator_1.body)('email').isEmail().normalizeEmail(), (0, express_validator_1.body)('password').isLength({ min: 1 })], async (req, res) => {
+const loginValidators = [(0, express_validator_1.body)('email').isEmail().normalizeEmail(), (0, express_validator_1.body)('password').isLength({ min: 1 })];
+const handleLogin = async (req, res) => {
     const errors = (0, express_validator_1.validationResult)(req);
     if (!errors.isEmpty())
         return res.status(400).json({ errors: errors.array() });
@@ -92,7 +93,9 @@ app.post('/auth/login', [(0, express_validator_1.body)('email').isEmail().normal
         },
         token
     });
-});
+};
+app.post('/auth/login', loginValidators, handleLogin);
+app.post('/login', loginValidators, handleLogin);
 app.listen(PORT, '0.0.0.0', async () => {
     await mongo.connect();
     await eventBus.connect();

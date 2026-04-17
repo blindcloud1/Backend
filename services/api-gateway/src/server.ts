@@ -9,6 +9,7 @@ dotenv.config();
 
 const PORT = parseInt(process.env.PORT || '3001', 10);
 const AUTH_SERVICE_URL = process.env.AUTH_SERVICE_URL || 'http://localhost:4001';
+const USERS_SERVICE_URL = process.env.USERS_SERVICE_URL || 'http://localhost:4002';
 const CORS_ORIGINS = (process.env.CORS_ORIGINS || '').split(',').map(s => s.trim()).filter(Boolean);
 
 const app = express();
@@ -22,22 +23,35 @@ app.get('/health', (_req: Request, res: Response) => {
   res.json({ status: 'OK', service: 'api-gateway' });
 });
 
-app.use(
-  '/api/auth',
-  createProxyMiddleware({
-    target: AUTH_SERVICE_URL,
-    changeOrigin: true,
-    pathRewrite: { '^/api/auth': '/auth' },
-    on: {
-      proxyReq: (proxyReq: ClientRequest, req: IncomingMessage, _res: ServerResponse) => {
-        const correlationId = req.headers['x-correlation-id'];
-        if (correlationId && typeof correlationId === 'string') {
-          proxyReq.setHeader('x-correlation-id', correlationId);
-        }
+app.use(createProxyMiddleware({
+  target: AUTH_SERVICE_URL,
+  changeOrigin: true,
+  pathFilter: '/api/auth',
+  pathRewrite: { '^/api/auth': '/auth' },
+  on: {
+    proxyReq: (proxyReq: ClientRequest, req: IncomingMessage, _res: ServerResponse) => {
+      const correlationId = req.headers['x-correlation-id'];
+      if (correlationId && typeof correlationId === 'string') {
+        proxyReq.setHeader('x-correlation-id', correlationId);
       }
     }
-  })
-);
+  }
+}));
+
+app.use(createProxyMiddleware({
+  target: USERS_SERVICE_URL,
+  changeOrigin: true,
+  pathFilter: '/api/users',
+  pathRewrite: { '^/api/users': '/users' },
+  on: {
+    proxyReq: (proxyReq: ClientRequest, req: IncomingMessage, _res: ServerResponse) => {
+      const correlationId = req.headers['x-correlation-id'];
+      if (correlationId && typeof correlationId === 'string') {
+        proxyReq.setHeader('x-correlation-id', correlationId);
+      }
+    }
+  }
+}));
 
 app.use('/api', (_req: Request, res: Response) => {
   res.status(501).json({ error: 'Not implemented in gateway yet' });

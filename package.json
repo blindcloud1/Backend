@@ -8,8 +8,8 @@
     "packages/*"
   ],
   "scripts": {
-    "dev": "concurrently -n gateway,auth -c blue,green \"npm run dev -w @blindscloud/api-gateway\" \"npm run dev -w @blindscloud/auth-service\"",
-    "build": "npm run build -w @blindscloud/event-bus && npm run build -w @blindscloud/auth-service && npm run build -w @blindscloud/api-gateway",
+    "dev": "concurrently -n gateway,auth,users -c blue,green,magenta \"npm run dev -w @blindscloud/api-gateway\" \"npm run dev -w @blindscloud/auth-service\" \"npm run dev -w @blindscloud/users-service\"",
+    "build": "npm run build -w @blindscloud/event-bus && npm run build -w @blindscloud/auth-service && npm run build -w @blindscloud/users-service && npm run build -w @blindscloud/api-gateway",
     "start": "npm run start -w @blindscloud/api-gateway"
   },
   "keywords": [],

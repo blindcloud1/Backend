@@ -63,62 +63,63 @@ app.get('/health', async (_req: Request, res: Response) => {
   }
 });
 
-app.post(
-  '/auth/login',
-  [body('email').isEmail().normalizeEmail(), body('password').isLength({ min: 1 })],
-  async (req: Request, res: Response) => {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+const loginValidators = [body('email').isEmail().normalizeEmail(), body('password').isLength({ min: 1 })];
 
-    const { email, password } = req.body as { email: string; password: string };
+const handleLogin = async (req: Request, res: Response) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
 
-    const users = getUsersCollection();
-    const user = await users.findOne({ email: email.toLowerCase() });
-    if (!user) return res.status(401).json({ error: 'Invalid credentials' });
-    if (!user.isActive && user.role !== 'admin') return res.status(403).json({ error: 'Account blocked' });
-    if (!user.emailVerified && user.role !== 'admin') return res.status(403).json({ error: 'Email not verified' });
+  const { email, password } = req.body as { email: string; password: string };
 
-    const ok = await bcrypt.compare(password, user.passwordHash);
-    if (!ok) return res.status(401).json({ error: 'Invalid credentials' });
+  const users = getUsersCollection();
+  const user = await users.findOne({ email: email.toLowerCase() });
+  if (!user) return res.status(401).json({ error: 'Invalid credentials' });
+  if (!user.isActive && user.role !== 'admin') return res.status(403).json({ error: 'Account blocked' });
+  if (!user.emailVerified && user.role !== 'admin') return res.status(403).json({ error: 'Email not verified' });
 
-    const token = jwt.sign(
-      { userId: String(user._id), email: user.email, role: user.role },
-      JWT_SECRET,
-      { expiresIn: '60m' }
-    );
+  const ok = await bcrypt.compare(password, user.passwordHash);
+  if (!ok) return res.status(401).json({ error: 'Invalid credentials' });
 
-    const event: CloudEvent<{ userId: string; email: string; role: string }> = {
-      id: crypto.randomUUID(),
-      type: 'auth.login.succeeded',
-      version: 1,
-      source: 'auth-service',
-      occurredAt: new Date().toISOString(),
-      correlationId: req.header('x-correlation-id') || undefined,
-      payload: {
-        userId: String(user._id),
-        email: user.email,
-        role: user.role
-      }
-    };
+  const token = jwt.sign(
+    { userId: String(user._id), email: user.email, role: user.role },
+    JWT_SECRET,
+    { expiresIn: '60m' }
+  );
 
-    await eventBus.publish('auth.login.succeeded', event);
+  const event: CloudEvent<{ userId: string; email: string; role: string }> = {
+    id: crypto.randomUUID(),
+    type: 'auth.login.succeeded',
+    version: 1,
+    source: 'auth-service',
+    occurredAt: new Date().toISOString(),
+    correlationId: req.header('x-correlation-id') || undefined,
+    payload: {
+      userId: String(user._id),
+      email: user.email,
+      role: user.role
+    }
+  };
 
-    res.json({
-      user: {
-        id: String(user._id),
-        email: user.email,
-        name: user.name,
-        role: user.role,
-        businessId: user.businessId,
-        permissions: user.permissions,
-        isActive: user.isActive,
-        emailVerified: user.emailVerified,
-        createdAt: user.createdAt.toISOString()
-      },
-      token
-    });
-  }
-);
+  await eventBus.publish('auth.login.succeeded', event);
+
+  res.json({
+    user: {
+      id: String(user._id),
+      email: user.email,
+      name: user.name,
+      role: user.role,
+      businessId: user.businessId,
+      permissions: user.permissions,
+      isActive: user.isActive,
+      emailVerified: user.emailVerified,
+      createdAt: user.createdAt.toISOString()
+    },
+    token
+  });
+};
+
+app.post('/auth/login', loginValidators, handleLogin);
+app.post('/login', loginValidators, handleLogin);
 
 app.listen(PORT, '0.0.0.0', async () => {
   await mongo.connect();
