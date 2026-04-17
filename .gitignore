@@ -1,0 +1,4 @@
+node_env=development
+node_modules=node_modules
+node_modules
+.env

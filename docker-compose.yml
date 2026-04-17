@@ -1,0 +1,67 @@
+services:
+  mongo:
+    image: mongo:7
+    container_name: blindscloud-mongo
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USER:-admin}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:-change-me}
+    volumes:
+      - mongo-data:/data/db
+    networks:
+      - blindscloud-net
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: blindscloud-rabbitmq
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-admin}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-change-me}
+    ports:
+      - "127.0.0.1:15672:15672"
+    networks:
+      - blindscloud-net
+
+  auth-service:
+    build:
+      context: .
+      dockerfile: services/auth-service/Dockerfile
+    container_name: blindscloud-auth-service
+    restart: unless-stopped
+    environment:
+      PORT: 4001
+      JWT_SECRET: ${JWT_SECRET:-dev-secret-change}
+      MONGO_URL: ${MONGO_URL:-mongodb://${MONGO_ROOT_USER:-admin}:${MONGO_ROOT_PASSWORD:-change-me}@mongo:27017/admin}
+      RABBITMQ_URL: ${RABBITMQ_URL:-amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-change-me}@rabbitmq:5672}
+      EVENT_EXCHANGE: ${EVENT_EXCHANGE:-blindscloud.events}
+      SEED_DEMO: ${SEED_DEMO:-true}
+    depends_on:
+      - mongo
+      - rabbitmq
+    networks:
+      - blindscloud-net
+
+  api-gateway:
+    build:
+      context: .
+      dockerfile: services/api-gateway/Dockerfile
+    container_name: blindscloud-api-gateway
+    restart: unless-stopped
+    environment:
+      PORT: 3001
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173}
+      AUTH_SERVICE_URL: http://auth-service:4001
+    ports:
+      - "3001:3001"
+    depends_on:
+      - auth-service
+    networks:
+      - blindscloud-net
+
+networks:
+  blindscloud-net:
+    driver: bridge
+
+volumes:
+  mongo-data:

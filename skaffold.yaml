@@ -1,0 +1,19 @@
+apiVersion: skaffold/v4beta11
+kind: Config
+metadata:
+  name: blindscloud
+build:
+  local:
+    push: false
+  artifacts:
+    - image: blindscloud/api-gateway
+      context: .
+      docker:
+        dockerfile: services/api-gateway/Dockerfile
+    - image: blindscloud/auth-service
+      context: .
+      docker:
+        dockerfile: services/auth-service/Dockerfile
+manifests:
+  rawYaml:
+    - k8s/blindscloud.yaml

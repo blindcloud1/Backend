@@ -1,0 +1,24 @@
+{
+  "name": "blindscloud-backend",
+  "version": "1.0.0",
+  "private": true,
+  "description": "BlindsCloud microservices backend (MongoDB + RabbitMQ)",
+  "workspaces": [
+    "services/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "concurrently -n gateway,auth -c blue,green \"npm run dev -w @blindscloud/api-gateway\" \"npm run dev -w @blindscloud/auth-service\"",
+    "build": "npm run build -w @blindscloud/event-bus && npm run build -w @blindscloud/auth-service && npm run build -w @blindscloud/api-gateway",
+    "start": "npm run start -w @blindscloud/api-gateway"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "devDependencies": {
+    "concurrently": "^8.2.2",
+    "tsx": "^4.19.2",
+    "typescript": "^5.5.4"
+  }
+}
