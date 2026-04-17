@@ -18,6 +18,7 @@ const JOBS_SERVICE_URL = process.env.JOBS_SERVICE_URL || 'http://localhost:4005'
 const PRODUCTS_SERVICE_URL = process.env.PRODUCTS_SERVICE_URL || 'http://localhost:4006';
 const PRICING_SERVICE_URL = process.env.PRICING_SERVICE_URL || 'http://localhost:4007';
 const BILLING_SERVICE_URL = process.env.BILLING_SERVICE_URL || 'http://localhost:4008';
+const NOTIFICATIONS_SERVICE_URL = process.env.NOTIFICATIONS_SERVICE_URL || 'http://localhost:4009';
 const CORS_ORIGINS = (process.env.CORS_ORIGINS || '').split(',').map(s => s.trim()).filter(Boolean);
 const app = (0, express_1.default)();
 app.use((0, helmet_1.default)());
@@ -131,6 +132,34 @@ app.use((0, http_proxy_middleware_1.createProxyMiddleware)({
     changeOrigin: true,
     pathFilter: '/api/billing',
     pathRewrite: { '^/api/billing': '' },
+    on: {
+        proxyReq: (proxyReq, req, _res) => {
+            const correlationId = req.headers['x-correlation-id'];
+            if (correlationId && typeof correlationId === 'string') {
+                proxyReq.setHeader('x-correlation-id', correlationId);
+            }
+        }
+    }
+}));
+app.use((0, http_proxy_middleware_1.createProxyMiddleware)({
+    target: NOTIFICATIONS_SERVICE_URL,
+    changeOrigin: true,
+    pathFilter: '/api/notifications',
+    pathRewrite: { '^/api/notifications': '/notifications' },
+    on: {
+        proxyReq: (proxyReq, req, _res) => {
+            const correlationId = req.headers['x-correlation-id'];
+            if (correlationId && typeof correlationId === 'string') {
+                proxyReq.setHeader('x-correlation-id', correlationId);
+            }
+        }
+    }
+}));
+app.use((0, http_proxy_middleware_1.createProxyMiddleware)({
+    target: NOTIFICATIONS_SERVICE_URL,
+    changeOrigin: true,
+    pathFilter: '/api/push-subscriptions',
+    pathRewrite: { '^/api/push-subscriptions': '/push-subscriptions' },
     on: {
         proxyReq: (proxyReq, req, _res) => {
             const correlationId = req.headers['x-correlation-id'];
