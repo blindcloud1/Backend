@@ -60,6 +60,60 @@ services:
     networks:
       - blindscloud-net
 
+  businesses-service:
+    build:
+      context: .
+      dockerfile: services/businesses-service/Dockerfile
+    container_name: blindscloud-businesses-service
+    restart: unless-stopped
+    environment:
+      PORT: 4003
+      JWT_SECRET: ${JWT_SECRET:-dev-secret-change}
+      MONGO_URL: ${MONGO_URL:-mongodb://${MONGO_ROOT_USER:-admin}:${MONGO_ROOT_PASSWORD:-change-me}@mongo:27017/admin}
+      RABBITMQ_URL: ${RABBITMQ_URL:-amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-change-me}@rabbitmq:5672}
+      EVENT_EXCHANGE: ${EVENT_EXCHANGE:-blindscloud.events}
+    depends_on:
+      - mongo
+      - rabbitmq
+    networks:
+      - blindscloud-net
+
+  customers-service:
+    build:
+      context: .
+      dockerfile: services/customers-service/Dockerfile
+    container_name: blindscloud-customers-service
+    restart: unless-stopped
+    environment:
+      PORT: 4004
+      JWT_SECRET: ${JWT_SECRET:-dev-secret-change}
+      MONGO_URL: ${MONGO_URL:-mongodb://${MONGO_ROOT_USER:-admin}:${MONGO_ROOT_PASSWORD:-change-me}@mongo:27017/admin}
+      RABBITMQ_URL: ${RABBITMQ_URL:-amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-change-me}@rabbitmq:5672}
+      EVENT_EXCHANGE: ${EVENT_EXCHANGE:-blindscloud.events}
+    depends_on:
+      - mongo
+      - rabbitmq
+    networks:
+      - blindscloud-net
+
+  jobs-service:
+    build:
+      context: .
+      dockerfile: services/jobs-service/Dockerfile
+    container_name: blindscloud-jobs-service
+    restart: unless-stopped
+    environment:
+      PORT: 4005
+      JWT_SECRET: ${JWT_SECRET:-dev-secret-change}
+      MONGO_URL: ${MONGO_URL:-mongodb://${MONGO_ROOT_USER:-admin}:${MONGO_ROOT_PASSWORD:-change-me}@mongo:27017/admin}
+      RABBITMQ_URL: ${RABBITMQ_URL:-amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-change-me}@rabbitmq:5672}
+      EVENT_EXCHANGE: ${EVENT_EXCHANGE:-blindscloud.events}
+    depends_on:
+      - mongo
+      - rabbitmq
+    networks:
+      - blindscloud-net
+
   api-gateway:
     build:
       context: .
@@ -71,11 +125,17 @@ services:
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173}
       AUTH_SERVICE_URL: http://auth-service:4001
       USERS_SERVICE_URL: http://users-service:4002
+      BUSINESSES_SERVICE_URL: http://businesses-service:4003
+      CUSTOMERS_SERVICE_URL: http://customers-service:4004
+      JOBS_SERVICE_URL: http://jobs-service:4005
     ports:
       - "3001:3001"
     depends_on:
       - auth-service
       - users-service
+      - businesses-service
+      - customers-service
+      - jobs-service
     networks:
       - blindscloud-net
 

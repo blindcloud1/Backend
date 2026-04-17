@@ -6,6 +6,7 @@ import jwt from 'jsonwebtoken';
 import { MongoClient } from 'mongodb';
 import crypto from 'crypto';
 import { EventBus, type CloudEvent } from '@blindscloud/event-bus';
+import type { UserDoc, UserRole } from '@blindscloud/models';
 
 dotenv.config();
 
@@ -22,23 +23,10 @@ if (!RABBITMQ_URL) throw new Error('RABBITMQ_URL is required');
 type AuthUser = {
   id: string;
   email: string;
-  role: string;
+  role: UserRole | string;
 };
 
 type AuthRequest = Request & { user?: AuthUser };
-
-type UserDoc = {
-  _id: string;
-  email: string;
-  name: string;
-  role: 'admin' | 'business' | 'employee' | 'merchant';
-  businessId?: string;
-  parentId?: string;
-  permissions: string[];
-  isActive: boolean;
-  emailVerified: boolean;
-  createdAt: Date;
-};
 
 const mongo = new MongoClient(MONGO_URL);
 const eventBus = new EventBus({
@@ -239,4 +227,3 @@ app.listen(PORT, '0.0.0.0', async () => {
   await mongo.connect();
   await eventBus.connect();
 });
-

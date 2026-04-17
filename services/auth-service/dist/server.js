@@ -61,6 +61,8 @@ const handleLogin = async (req, res) => {
         return res.status(403).json({ error: 'Account blocked' });
     if (!user.emailVerified && user.role !== 'admin')
         return res.status(403).json({ error: 'Email not verified' });
+    if (!user.passwordHash)
+        return res.status(401).json({ error: 'Invalid credentials' });
     const ok = await bcryptjs_1.default.compare(password, user.passwordHash);
     if (!ok)
         return res.status(401).json({ error: 'Invalid credentials' });

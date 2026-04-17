@@ -10,6 +10,9 @@ dotenv.config();
 const PORT = parseInt(process.env.PORT || '3001', 10);
 const AUTH_SERVICE_URL = process.env.AUTH_SERVICE_URL || 'http://localhost:4001';
 const USERS_SERVICE_URL = process.env.USERS_SERVICE_URL || 'http://localhost:4002';
+const BUSINESSES_SERVICE_URL = process.env.BUSINESSES_SERVICE_URL || 'http://localhost:4003';
+const CUSTOMERS_SERVICE_URL = process.env.CUSTOMERS_SERVICE_URL || 'http://localhost:4004';
+const JOBS_SERVICE_URL = process.env.JOBS_SERVICE_URL || 'http://localhost:4005';
 const CORS_ORIGINS = (process.env.CORS_ORIGINS || '').split(',').map(s => s.trim()).filter(Boolean);
 
 const app = express();
@@ -43,6 +46,51 @@ app.use(createProxyMiddleware({
   changeOrigin: true,
   pathFilter: '/api/users',
   pathRewrite: { '^/api/users': '/users' },
+  on: {
+    proxyReq: (proxyReq: ClientRequest, req: IncomingMessage, _res: ServerResponse) => {
+      const correlationId = req.headers['x-correlation-id'];
+      if (correlationId && typeof correlationId === 'string') {
+        proxyReq.setHeader('x-correlation-id', correlationId);
+      }
+    }
+  }
+}));
+
+app.use(createProxyMiddleware({
+  target: BUSINESSES_SERVICE_URL,
+  changeOrigin: true,
+  pathFilter: '/api/businesses',
+  pathRewrite: { '^/api/businesses': '/businesses' },
+  on: {
+    proxyReq: (proxyReq: ClientRequest, req: IncomingMessage, _res: ServerResponse) => {
+      const correlationId = req.headers['x-correlation-id'];
+      if (correlationId && typeof correlationId === 'string') {
+        proxyReq.setHeader('x-correlation-id', correlationId);
+      }
+    }
+  }
+}));
+
+app.use(createProxyMiddleware({
+  target: CUSTOMERS_SERVICE_URL,
+  changeOrigin: true,
+  pathFilter: '/api/customers',
+  pathRewrite: { '^/api/customers': '/customers' },
+  on: {
+    proxyReq: (proxyReq: ClientRequest, req: IncomingMessage, _res: ServerResponse) => {
+      const correlationId = req.headers['x-correlation-id'];
+      if (correlationId && typeof correlationId === 'string') {
+        proxyReq.setHeader('x-correlation-id', correlationId);
+      }
+    }
+  }
+}));
+
+app.use(createProxyMiddleware({
+  target: JOBS_SERVICE_URL,
+  changeOrigin: true,
+  pathFilter: '/api/jobs',
+  pathRewrite: { '^/api/jobs': '/jobs' },
   on: {
     proxyReq: (proxyReq: ClientRequest, req: IncomingMessage, _res: ServerResponse) => {
       const correlationId = req.headers['x-correlation-id'];

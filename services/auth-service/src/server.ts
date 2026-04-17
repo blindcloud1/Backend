@@ -6,6 +6,7 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { MongoClient } from 'mongodb';
 import { EventBus, type CloudEvent } from '@blindscloud/event-bus';
+import type { UserDoc } from '@blindscloud/models';
 import crypto from 'crypto';
 
 dotenv.config();
@@ -38,20 +39,6 @@ const eventBus = new EventBus({
   serviceName: 'auth-service'
 });
 
-type UserDoc = {
-  _id: unknown;
-  email: string;
-  name: string;
-  passwordHash: string;
-  role: 'admin' | 'business' | 'employee' | 'merchant';
-  businessId?: string;
-  permissions: string[];
-  isActive: boolean;
-  emailVerified: boolean;
-  verificationToken?: string;
-  createdAt: Date;
-};
-
 const getUsersCollection = () => mongo.db('blindscloud').collection<UserDoc>('users');
 
 app.get('/health', async (_req: Request, res: Response) => {
@@ -76,6 +63,7 @@ const handleLogin = async (req: Request, res: Response) => {
   if (!user) return res.status(401).json({ error: 'Invalid credentials' });
   if (!user.isActive && user.role !== 'admin') return res.status(403).json({ error: 'Account blocked' });
   if (!user.emailVerified && user.role !== 'admin') return res.status(403).json({ error: 'Email not verified' });
+  if (!user.passwordHash) return res.status(401).json({ error: 'Invalid credentials' });
 
   const ok = await bcrypt.compare(password, user.passwordHash);
   if (!ok) return res.status(401).json({ error: 'Invalid credentials' });
