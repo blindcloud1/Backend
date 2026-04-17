@@ -186,6 +186,28 @@ services:
     networks:
       - blindscloud-net
 
+  files-service:
+    build:
+      context: .
+      dockerfile: services/files-service/Dockerfile
+    container_name: blindscloud-files-service
+    restart: unless-stopped
+    environment:
+      PORT: 4010
+      JWT_SECRET: ${JWT_SECRET:-dev-secret-change}
+      MONGO_URL: ${MONGO_URL:-mongodb://${MONGO_ROOT_USER:-admin}:${MONGO_ROOT_PASSWORD:-change-me}@mongo:27017/admin}
+      RABBITMQ_URL: ${RABBITMQ_URL:-amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-change-me}@rabbitmq:5672}
+      EVENT_EXCHANGE: ${EVENT_EXCHANGE:-blindscloud.events}
+      UPLOAD_DIR: /data/uploads
+      FILES_BASE_URL: ${FILES_BASE_URL:-}
+    volumes:
+      - uploads-data:/data/uploads
+    depends_on:
+      - mongo
+      - rabbitmq
+    networks:
+      - blindscloud-net
+
   api-gateway:
     build:
       context: .
@@ -204,6 +226,7 @@ services:
       PRICING_SERVICE_URL: http://pricing-service:4007
       BILLING_SERVICE_URL: http://billing-service:4008
       NOTIFICATIONS_SERVICE_URL: http://notifications-service:4009
+      FILES_SERVICE_URL: http://files-service:4010
     ports:
       - "3001:3001"
     depends_on:
@@ -216,6 +239,7 @@ services:
       - pricing-service
       - billing-service
       - notifications-service
+      - files-service
     networks:
       - blindscloud-net
 
@@ -225,3 +249,4 @@ networks:
 
 volumes:
   mongo-data:
+  uploads-data:

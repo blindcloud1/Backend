@@ -211,3 +211,13 @@ export type CustomPlanConfigDoc = DbDocBase & DbTimestamps & {
     userPrice: number;
     storagePrice: number;
 };
+export type FileDoc = DbDocBase & {
+    ownerId: string;
+    filename: string;
+    mimeType: string;
+    sizeBytes: number;
+    storagePath: string;
+    jobId?: string;
+    productId?: string;
+    createdAt: Date;
+};
