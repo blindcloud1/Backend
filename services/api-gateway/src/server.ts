@@ -15,6 +15,7 @@ const CUSTOMERS_SERVICE_URL = process.env.CUSTOMERS_SERVICE_URL || 'http://local
 const JOBS_SERVICE_URL = process.env.JOBS_SERVICE_URL || 'http://localhost:4005';
 const PRODUCTS_SERVICE_URL = process.env.PRODUCTS_SERVICE_URL || 'http://localhost:4006';
 const PRICING_SERVICE_URL = process.env.PRICING_SERVICE_URL || 'http://localhost:4007';
+const BILLING_SERVICE_URL = process.env.BILLING_SERVICE_URL || 'http://localhost:4008';
 const CORS_ORIGINS = (process.env.CORS_ORIGINS || '').split(',').map(s => s.trim()).filter(Boolean);
 
 const app = express();
@@ -123,6 +124,21 @@ app.use(createProxyMiddleware({
   changeOrigin: true,
   pathFilter: '/api/pricing-tables',
   pathRewrite: { '^/api/pricing-tables': '/pricing-tables' },
+  on: {
+    proxyReq: (proxyReq: ClientRequest, req: IncomingMessage, _res: ServerResponse) => {
+      const correlationId = req.headers['x-correlation-id'];
+      if (correlationId && typeof correlationId === 'string') {
+        proxyReq.setHeader('x-correlation-id', correlationId);
+      }
+    }
+  }
+}));
+
+app.use(createProxyMiddleware({
+  target: BILLING_SERVICE_URL,
+  changeOrigin: true,
+  pathFilter: '/api/billing',
+  pathRewrite: { '^/api/billing': '' },
   on: {
     proxyReq: (proxyReq: ClientRequest, req: IncomingMessage, _res: ServerResponse) => {
       const correlationId = req.headers['x-correlation-id'];
