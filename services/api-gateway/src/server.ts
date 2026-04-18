@@ -20,6 +20,11 @@ const NOTIFICATIONS_SERVICE_URL = process.env.NOTIFICATIONS_SERVICE_URL || 'http
 const FILES_SERVICE_URL = process.env.FILES_SERVICE_URL || 'http://localhost:4010';
 const ORDERS_SERVICE_URL = process.env.ORDERS_SERVICE_URL || 'http://localhost:4011';
 const DEMO_REQUESTS_SERVICE_URL = process.env.DEMO_REQUESTS_SERVICE_URL || 'http://localhost:4012';
+const MODULE_PERMISSIONS_SERVICE_URL = process.env.MODULE_PERMISSIONS_SERVICE_URL || 'http://localhost:4013';
+const MODELS3D_SERVICE_URL = process.env.MODELS3D_SERVICE_URL || 'http://localhost:4014';
+const MODEL_PERMISSIONS_SERVICE_URL = process.env.MODEL_PERMISSIONS_SERVICE_URL || 'http://localhost:4015';
+const ACTIVITY_LOGS_SERVICE_URL = process.env.ACTIVITY_LOGS_SERVICE_URL || 'http://localhost:4016';
+const USER_SESSIONS_SERVICE_URL = process.env.USER_SESSIONS_SERVICE_URL || 'http://localhost:4017';
 const CORS_ORIGINS = (process.env.CORS_ORIGINS || '').split(',').map(s => s.trim()).filter(Boolean);
 
 const app = express();
@@ -32,6 +37,125 @@ app.use(cors({
 app.get('/health', (_req: Request, res: Response) => {
   res.json({ status: 'OK', service: 'api-gateway' });
 });
+
+app.use(createProxyMiddleware({
+  target: AUTH_SERVICE_URL,
+  changeOrigin: true,
+  pathFilter: '/api/auth/health',
+  pathRewrite: { '^/api/auth/health': '/health' }
+}));
+
+app.use(createProxyMiddleware({
+  target: USERS_SERVICE_URL,
+  changeOrigin: true,
+  pathFilter: '/api/users/health',
+  pathRewrite: { '^/api/users/health': '/health' }
+}));
+
+app.use(createProxyMiddleware({
+  target: BUSINESSES_SERVICE_URL,
+  changeOrigin: true,
+  pathFilter: '/api/businesses/health',
+  pathRewrite: { '^/api/businesses/health': '/health' }
+}));
+
+app.use(createProxyMiddleware({
+  target: CUSTOMERS_SERVICE_URL,
+  changeOrigin: true,
+  pathFilter: '/api/customers/health',
+  pathRewrite: { '^/api/customers/health': '/health' }
+}));
+
+app.use(createProxyMiddleware({
+  target: JOBS_SERVICE_URL,
+  changeOrigin: true,
+  pathFilter: '/api/jobs/health',
+  pathRewrite: { '^/api/jobs/health': '/health' }
+}));
+
+app.use(createProxyMiddleware({
+  target: PRODUCTS_SERVICE_URL,
+  changeOrigin: true,
+  pathFilter: '/api/products/health',
+  pathRewrite: { '^/api/products/health': '/health' }
+}));
+
+app.use(createProxyMiddleware({
+  target: PRICING_SERVICE_URL,
+  changeOrigin: true,
+  pathFilter: '/api/pricing-tables/health',
+  pathRewrite: { '^/api/pricing-tables/health': '/health' }
+}));
+
+app.use(createProxyMiddleware({
+  target: BILLING_SERVICE_URL,
+  changeOrigin: true,
+  pathFilter: '/api/billing/health',
+  pathRewrite: { '^/api/billing/health': '/health' }
+}));
+
+app.use(createProxyMiddleware({
+  target: NOTIFICATIONS_SERVICE_URL,
+  changeOrigin: true,
+  pathFilter: '/api/notifications/health',
+  pathRewrite: { '^/api/notifications/health': '/health' }
+}));
+
+app.use(createProxyMiddleware({
+  target: FILES_SERVICE_URL,
+  changeOrigin: true,
+  pathFilter: '/api/files/health',
+  pathRewrite: { '^/api/files/health': '/health' }
+}));
+
+app.use(createProxyMiddleware({
+  target: ORDERS_SERVICE_URL,
+  changeOrigin: true,
+  pathFilter: '/api/orders/health',
+  pathRewrite: { '^/api/orders/health': '/health' }
+}));
+
+app.use(createProxyMiddleware({
+  target: DEMO_REQUESTS_SERVICE_URL,
+  changeOrigin: true,
+  pathFilter: '/api/demo-requests/health',
+  pathRewrite: { '^/api/demo-requests/health': '/health' }
+}));
+
+app.use(createProxyMiddleware({
+  target: MODULE_PERMISSIONS_SERVICE_URL,
+  changeOrigin: true,
+  pathFilter: '/api/module-permissions/health',
+  pathRewrite: { '^/api/module-permissions/health': '/health' }
+}));
+
+app.use(createProxyMiddleware({
+  target: MODELS3D_SERVICE_URL,
+  changeOrigin: true,
+  pathFilter: '/api/models-3d/health',
+  pathRewrite: { '^/api/models-3d/health': '/health' }
+}));
+
+app.use(createProxyMiddleware({
+  target: MODEL_PERMISSIONS_SERVICE_URL,
+  changeOrigin: true,
+  pathFilter: '/api/model-permissions/health',
+  pathRewrite: { '^/api/model-permissions/health': '/health' }
+}));
+
+app.use(createProxyMiddleware({
+  target: ACTIVITY_LOGS_SERVICE_URL,
+  changeOrigin: true,
+  pathFilter: '/api/activity-logs/health',
+  pathRewrite: { '^/api/activity-logs/health': '/health' }
+}));
+
+app.use(createProxyMiddleware({
+  target: USER_SESSIONS_SERVICE_URL,
+  changeOrigin: true,
+  pathFilter: '/api/sessions/health',
+  pathRewrite: { '^/api/sessions/health': '/health' }
+}));
 
 app.use(createProxyMiddleware({
   target: AUTH_SERVICE_URL,
@@ -218,6 +342,81 @@ app.use(createProxyMiddleware({
   changeOrigin: true,
   pathFilter: '/api/demo-requests',
   pathRewrite: { '^/api/demo-requests': '/demo-requests' },
+  on: {
+    proxyReq: (proxyReq: ClientRequest, req: IncomingMessage, _res: ServerResponse) => {
+      const correlationId = req.headers['x-correlation-id'];
+      if (correlationId && typeof correlationId === 'string') {
+        proxyReq.setHeader('x-correlation-id', correlationId);
+      }
+    }
+  }
+}));
+
+app.use(createProxyMiddleware({
+  target: MODULE_PERMISSIONS_SERVICE_URL,
+  changeOrigin: true,
+  pathFilter: '/api/module-permissions',
+  pathRewrite: { '^/api/module-permissions': '/module-permissions' },
+  on: {
+    proxyReq: (proxyReq: ClientRequest, req: IncomingMessage, _res: ServerResponse) => {
+      const correlationId = req.headers['x-correlation-id'];
+      if (correlationId && typeof correlationId === 'string') {
+        proxyReq.setHeader('x-correlation-id', correlationId);
+      }
+    }
+  }
+}));
+
+app.use(createProxyMiddleware({
+  target: MODELS3D_SERVICE_URL,
+  changeOrigin: true,
+  pathFilter: '/api/models-3d',
+  pathRewrite: { '^/api/models-3d': '/models-3d' },
+  on: {
+    proxyReq: (proxyReq: ClientRequest, req: IncomingMessage, _res: ServerResponse) => {
+      const correlationId = req.headers['x-correlation-id'];
+      if (correlationId && typeof correlationId === 'string') {
+        proxyReq.setHeader('x-correlation-id', correlationId);
+      }
+    }
+  }
+}));
+
+app.use(createProxyMiddleware({
+  target: MODEL_PERMISSIONS_SERVICE_URL,
+  changeOrigin: true,
+  pathFilter: '/api/model-permissions',
+  pathRewrite: { '^/api/model-permissions': '/model-permissions' },
+  on: {
+    proxyReq: (proxyReq: ClientRequest, req: IncomingMessage, _res: ServerResponse) => {
+      const correlationId = req.headers['x-correlation-id'];
+      if (correlationId && typeof correlationId === 'string') {
+        proxyReq.setHeader('x-correlation-id', correlationId);
+      }
+    }
+  }
+}));
+
+app.use(createProxyMiddleware({
+  target: ACTIVITY_LOGS_SERVICE_URL,
+  changeOrigin: true,
+  pathFilter: '/api/activity-logs',
+  pathRewrite: { '^/api/activity-logs': '/activity-logs' },
+  on: {
+    proxyReq: (proxyReq: ClientRequest, req: IncomingMessage, _res: ServerResponse) => {
+      const correlationId = req.headers['x-correlation-id'];
+      if (correlationId && typeof correlationId === 'string') {
+        proxyReq.setHeader('x-correlation-id', correlationId);
+      }
+    }
+  }
+}));
+
+app.use(createProxyMiddleware({
+  target: USER_SESSIONS_SERVICE_URL,
+  changeOrigin: true,
+  pathFilter: '/api/sessions',
+  pathRewrite: { '^/api/sessions': '/sessions' },
   on: {
     proxyReq: (proxyReq: ClientRequest, req: IncomingMessage, _res: ServerResponse) => {
       const correlationId = req.headers['x-correlation-id'];

@@ -244,6 +244,96 @@ services:
     networks:
       - blindscloud-net
 
+  module-permissions-service:
+    build:
+      context: .
+      dockerfile: services/module-permissions-service/Dockerfile
+    container_name: blindscloud-module-permissions-service
+    restart: unless-stopped
+    environment:
+      PORT: 4013
+      JWT_SECRET: ${JWT_SECRET:-dev-secret-change}
+      MONGO_URL: ${MONGO_URL:-mongodb://${MONGO_ROOT_USER:-admin}:${MONGO_ROOT_PASSWORD:-change-me}@mongo:27017/admin}
+      RABBITMQ_URL: ${RABBITMQ_URL:-amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-change-me}@rabbitmq:5672}
+      EVENT_EXCHANGE: ${EVENT_EXCHANGE:-blindscloud.events}
+    depends_on:
+      - mongo
+      - rabbitmq
+    networks:
+      - blindscloud-net
+
+  models3d-service:
+    build:
+      context: .
+      dockerfile: services/models3d-service/Dockerfile
+    container_name: blindscloud-models3d-service
+    restart: unless-stopped
+    environment:
+      PORT: 4014
+      JWT_SECRET: ${JWT_SECRET:-dev-secret-change}
+      MONGO_URL: ${MONGO_URL:-mongodb://${MONGO_ROOT_USER:-admin}:${MONGO_ROOT_PASSWORD:-change-me}@mongo:27017/admin}
+      RABBITMQ_URL: ${RABBITMQ_URL:-amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-change-me}@rabbitmq:5672}
+      EVENT_EXCHANGE: ${EVENT_EXCHANGE:-blindscloud.events}
+    depends_on:
+      - mongo
+      - rabbitmq
+    networks:
+      - blindscloud-net
+
+  model-permissions-service:
+    build:
+      context: .
+      dockerfile: services/model-permissions-service/Dockerfile
+    container_name: blindscloud-model-permissions-service
+    restart: unless-stopped
+    environment:
+      PORT: 4015
+      JWT_SECRET: ${JWT_SECRET:-dev-secret-change}
+      MONGO_URL: ${MONGO_URL:-mongodb://${MONGO_ROOT_USER:-admin}:${MONGO_ROOT_PASSWORD:-change-me}@mongo:27017/admin}
+      RABBITMQ_URL: ${RABBITMQ_URL:-amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-change-me}@rabbitmq:5672}
+      EVENT_EXCHANGE: ${EVENT_EXCHANGE:-blindscloud.events}
+    depends_on:
+      - mongo
+      - rabbitmq
+    networks:
+      - blindscloud-net
+
+  activity-logs-service:
+    build:
+      context: .
+      dockerfile: services/activity-logs-service/Dockerfile
+    container_name: blindscloud-activity-logs-service
+    restart: unless-stopped
+    environment:
+      PORT: 4016
+      JWT_SECRET: ${JWT_SECRET:-dev-secret-change}
+      MONGO_URL: ${MONGO_URL:-mongodb://${MONGO_ROOT_USER:-admin}:${MONGO_ROOT_PASSWORD:-change-me}@mongo:27017/admin}
+      RABBITMQ_URL: ${RABBITMQ_URL:-amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-change-me}@rabbitmq:5672}
+      EVENT_EXCHANGE: ${EVENT_EXCHANGE:-blindscloud.events}
+    depends_on:
+      - mongo
+      - rabbitmq
+    networks:
+      - blindscloud-net
+
+  user-sessions-service:
+    build:
+      context: .
+      dockerfile: services/user-sessions-service/Dockerfile
+    container_name: blindscloud-user-sessions-service
+    restart: unless-stopped
+    environment:
+      PORT: 4017
+      JWT_SECRET: ${JWT_SECRET:-dev-secret-change}
+      MONGO_URL: ${MONGO_URL:-mongodb://${MONGO_ROOT_USER:-admin}:${MONGO_ROOT_PASSWORD:-change-me}@mongo:27017/admin}
+      RABBITMQ_URL: ${RABBITMQ_URL:-amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-change-me}@rabbitmq:5672}
+      EVENT_EXCHANGE: ${EVENT_EXCHANGE:-blindscloud.events}
+    depends_on:
+      - mongo
+      - rabbitmq
+    networks:
+      - blindscloud-net
+
   api-gateway:
     build:
       context: .
@@ -265,6 +355,11 @@ services:
       FILES_SERVICE_URL: http://files-service:4010
       ORDERS_SERVICE_URL: http://orders-service:4011
       DEMO_REQUESTS_SERVICE_URL: http://demo-requests-service:4012
+      MODULE_PERMISSIONS_SERVICE_URL: http://module-permissions-service:4013
+      MODELS3D_SERVICE_URL: http://models3d-service:4014
+      MODEL_PERMISSIONS_SERVICE_URL: http://model-permissions-service:4015
+      ACTIVITY_LOGS_SERVICE_URL: http://activity-logs-service:4016
+      USER_SESSIONS_SERVICE_URL: http://user-sessions-service:4017
     ports:
       - "3001:3001"
     depends_on:
@@ -280,6 +375,11 @@ services:
       - files-service
       - orders-service
       - demo-requests-service
+      - module-permissions-service
+      - models3d-service
+      - model-permissions-service
+      - activity-logs-service
+      - user-sessions-service
     networks:
       - blindscloud-net
 

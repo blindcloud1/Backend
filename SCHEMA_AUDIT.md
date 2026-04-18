@@ -39,9 +39,8 @@ Enforced in: `POST /users` in the users service.
 | `orders` | `orders` | `OrderDoc` | orders-service → `/api/orders/*` |
 | `demo_requests` | `demo_requests` | `DemoRequestDoc` | demo-requests-service → `/api/demo-requests/*` |
 | `files` (Mongo-only metadata) | `files` | `FileDoc` | files-service → `/api/files/*` |
-| `module_permissions` | (not yet implemented) | `ModulePermissionDoc` | not yet implemented |
-| `models_3d` | (not yet implemented) | `Model3DDoc` | not yet implemented |
-| `model_permissions` | (not yet implemented) | `ModelPermissionDoc` | not yet implemented |
-| `activity_logs` | (not yet implemented) | `ActivityLogDoc` | not yet implemented |
-| `user_sessions` | (not yet implemented) | `UserSessionDoc` | not yet implemented |
-
+| `module_permissions` | `module_permissions` | `ModulePermissionDoc` | module-permissions-service → `/api/module-permissions/*` |
+| `models_3d` | `models_3d` | `Model3DDoc` | models3d-service → `/api/models-3d/*` |
+| `model_permissions` | `model_permissions` | `ModelPermissionDoc` | model-permissions-service → `/api/model-permissions/*` |
+| `activity_logs` | `activity_logs` | `ActivityLogDoc` | activity-logs-service → `/api/activity-logs/*` |
+| `user_sessions` | `user_sessions` | `UserSessionDoc` | user-sessions-service → `/api/sessions/*` |

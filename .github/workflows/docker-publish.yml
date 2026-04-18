@@ -55,6 +55,21 @@ jobs:
           - service: demo-requests-service
             dockerfile: services/demo-requests-service/Dockerfile
             image: ghcr.io/${{ github.repository_owner }}/blindscloud-demo-requests-service
+          - service: module-permissions-service
+            dockerfile: services/module-permissions-service/Dockerfile
+            image: ghcr.io/${{ github.repository_owner }}/blindscloud-module-permissions-service
+          - service: models3d-service
+            dockerfile: services/models3d-service/Dockerfile
+            image: ghcr.io/${{ github.repository_owner }}/blindscloud-models3d-service
+          - service: model-permissions-service
+            dockerfile: services/model-permissions-service/Dockerfile
+            image: ghcr.io/${{ github.repository_owner }}/blindscloud-model-permissions-service
+          - service: activity-logs-service
+            dockerfile: services/activity-logs-service/Dockerfile
+            image: ghcr.io/${{ github.repository_owner }}/blindscloud-activity-logs-service
+          - service: user-sessions-service
+            dockerfile: services/user-sessions-service/Dockerfile
+            image: ghcr.io/${{ github.repository_owner }}/blindscloud-user-sessions-service
 
     steps:
       - uses: actions/checkout@v4

@@ -22,6 +22,11 @@ const NOTIFICATIONS_SERVICE_URL = process.env.NOTIFICATIONS_SERVICE_URL || 'http
 const FILES_SERVICE_URL = process.env.FILES_SERVICE_URL || 'http://localhost:4010';
 const ORDERS_SERVICE_URL = process.env.ORDERS_SERVICE_URL || 'http://localhost:4011';
 const DEMO_REQUESTS_SERVICE_URL = process.env.DEMO_REQUESTS_SERVICE_URL || 'http://localhost:4012';
+const MODULE_PERMISSIONS_SERVICE_URL = process.env.MODULE_PERMISSIONS_SERVICE_URL || 'http://localhost:4013';
+const MODELS3D_SERVICE_URL = process.env.MODELS3D_SERVICE_URL || 'http://localhost:4014';
+const MODEL_PERMISSIONS_SERVICE_URL = process.env.MODEL_PERMISSIONS_SERVICE_URL || 'http://localhost:4015';
+const ACTIVITY_LOGS_SERVICE_URL = process.env.ACTIVITY_LOGS_SERVICE_URL || 'http://localhost:4016';
+const USER_SESSIONS_SERVICE_URL = process.env.USER_SESSIONS_SERVICE_URL || 'http://localhost:4017';
 const CORS_ORIGINS = (process.env.CORS_ORIGINS || '').split(',').map(s => s.trim()).filter(Boolean);
 const app = (0, express_1.default)();
 app.use((0, helmet_1.default)());
@@ -32,6 +37,108 @@ app.use((0, cors_1.default)({
 app.get('/health', (_req, res) => {
     res.json({ status: 'OK', service: 'api-gateway' });
 });
+app.use((0, http_proxy_middleware_1.createProxyMiddleware)({
+    target: AUTH_SERVICE_URL,
+    changeOrigin: true,
+    pathFilter: '/api/auth/health',
+    pathRewrite: { '^/api/auth/health': '/health' }
+}));
+app.use((0, http_proxy_middleware_1.createProxyMiddleware)({
+    target: USERS_SERVICE_URL,
+    changeOrigin: true,
+    pathFilter: '/api/users/health',
+    pathRewrite: { '^/api/users/health': '/health' }
+}));
+app.use((0, http_proxy_middleware_1.createProxyMiddleware)({
+    target: BUSINESSES_SERVICE_URL,
+    changeOrigin: true,
+    pathFilter: '/api/businesses/health',
+    pathRewrite: { '^/api/businesses/health': '/health' }
+}));
+app.use((0, http_proxy_middleware_1.createProxyMiddleware)({
+    target: CUSTOMERS_SERVICE_URL,
+    changeOrigin: true,
+    pathFilter: '/api/customers/health',
+    pathRewrite: { '^/api/customers/health': '/health' }
+}));
+app.use((0, http_proxy_middleware_1.createProxyMiddleware)({
+    target: JOBS_SERVICE_URL,
+    changeOrigin: true,
+    pathFilter: '/api/jobs/health',
+    pathRewrite: { '^/api/jobs/health': '/health' }
+}));
+app.use((0, http_proxy_middleware_1.createProxyMiddleware)({
+    target: PRODUCTS_SERVICE_URL,
+    changeOrigin: true,
+    pathFilter: '/api/products/health',
+    pathRewrite: { '^/api/products/health': '/health' }
+}));
+app.use((0, http_proxy_middleware_1.createProxyMiddleware)({
+    target: PRICING_SERVICE_URL,
+    changeOrigin: true,
+    pathFilter: '/api/pricing-tables/health',
+    pathRewrite: { '^/api/pricing-tables/health': '/health' }
+}));
+app.use((0, http_proxy_middleware_1.createProxyMiddleware)({
+    target: BILLING_SERVICE_URL,
+    changeOrigin: true,
+    pathFilter: '/api/billing/health',
+    pathRewrite: { '^/api/billing/health': '/health' }
+}));
+app.use((0, http_proxy_middleware_1.createProxyMiddleware)({
+    target: NOTIFICATIONS_SERVICE_URL,
+    changeOrigin: true,
+    pathFilter: '/api/notifications/health',
+    pathRewrite: { '^/api/notifications/health': '/health' }
+}));
+app.use((0, http_proxy_middleware_1.createProxyMiddleware)({
+    target: FILES_SERVICE_URL,
+    changeOrigin: true,
+    pathFilter: '/api/files/health',
+    pathRewrite: { '^/api/files/health': '/health' }
+}));
+app.use((0, http_proxy_middleware_1.createProxyMiddleware)({
+    target: ORDERS_SERVICE_URL,
+    changeOrigin: true,
+    pathFilter: '/api/orders/health',
+    pathRewrite: { '^/api/orders/health': '/health' }
+}));
+app.use((0, http_proxy_middleware_1.createProxyMiddleware)({
+    target: DEMO_REQUESTS_SERVICE_URL,
+    changeOrigin: true,
+    pathFilter: '/api/demo-requests/health',
+    pathRewrite: { '^/api/demo-requests/health': '/health' }
+}));
+app.use((0, http_proxy_middleware_1.createProxyMiddleware)({
+    target: MODULE_PERMISSIONS_SERVICE_URL,
+    changeOrigin: true,
+    pathFilter: '/api/module-permissions/health',
+    pathRewrite: { '^/api/module-permissions/health': '/health' }
+}));
+app.use((0, http_proxy_middleware_1.createProxyMiddleware)({
+    target: MODELS3D_SERVICE_URL,
+    changeOrigin: true,
+    pathFilter: '/api/models-3d/health',
+    pathRewrite: { '^/api/models-3d/health': '/health' }
+}));
+app.use((0, http_proxy_middleware_1.createProxyMiddleware)({
+    target: MODEL_PERMISSIONS_SERVICE_URL,
+    changeOrigin: true,
+    pathFilter: '/api/model-permissions/health',
+    pathRewrite: { '^/api/model-permissions/health': '/health' }
+}));
+app.use((0, http_proxy_middleware_1.createProxyMiddleware)({
+    target: ACTIVITY_LOGS_SERVICE_URL,
+    changeOrigin: true,
+    pathFilter: '/api/activity-logs/health',
+    pathRewrite: { '^/api/activity-logs/health': '/health' }
+}));
+app.use((0, http_proxy_middleware_1.createProxyMiddleware)({
+    target: USER_SESSIONS_SERVICE_URL,
+    changeOrigin: true,
+    pathFilter: '/api/sessions/health',
+    pathRewrite: { '^/api/sessions/health': '/health' }
+}));
 app.use((0, http_proxy_middleware_1.createProxyMiddleware)({
     target: AUTH_SERVICE_URL,
     changeOrigin: true,
@@ -205,6 +312,76 @@ app.use((0, http_proxy_middleware_1.createProxyMiddleware)({
     changeOrigin: true,
     pathFilter: '/api/demo-requests',
     pathRewrite: { '^/api/demo-requests': '/demo-requests' },
+    on: {
+        proxyReq: (proxyReq, req, _res) => {
+            const correlationId = req.headers['x-correlation-id'];
+            if (correlationId && typeof correlationId === 'string') {
+                proxyReq.setHeader('x-correlation-id', correlationId);
+            }
+        }
+    }
+}));
+app.use((0, http_proxy_middleware_1.createProxyMiddleware)({
+    target: MODULE_PERMISSIONS_SERVICE_URL,
+    changeOrigin: true,
+    pathFilter: '/api/module-permissions',
+    pathRewrite: { '^/api/module-permissions': '/module-permissions' },
+    on: {
+        proxyReq: (proxyReq, req, _res) => {
+            const correlationId = req.headers['x-correlation-id'];
+            if (correlationId && typeof correlationId === 'string') {
+                proxyReq.setHeader('x-correlation-id', correlationId);
+            }
+        }
+    }
+}));
+app.use((0, http_proxy_middleware_1.createProxyMiddleware)({
+    target: MODELS3D_SERVICE_URL,
+    changeOrigin: true,
+    pathFilter: '/api/models-3d',
+    pathRewrite: { '^/api/models-3d': '/models-3d' },
+    on: {
+        proxyReq: (proxyReq, req, _res) => {
+            const correlationId = req.headers['x-correlation-id'];
+            if (correlationId && typeof correlationId === 'string') {
+                proxyReq.setHeader('x-correlation-id', correlationId);
+            }
+        }
+    }
+}));
+app.use((0, http_proxy_middleware_1.createProxyMiddleware)({
+    target: MODEL_PERMISSIONS_SERVICE_URL,
+    changeOrigin: true,
+    pathFilter: '/api/model-permissions',
+    pathRewrite: { '^/api/model-permissions': '/model-permissions' },
+    on: {
+        proxyReq: (proxyReq, req, _res) => {
+            const correlationId = req.headers['x-correlation-id'];
+            if (correlationId && typeof correlationId === 'string') {
+                proxyReq.setHeader('x-correlation-id', correlationId);
+            }
+        }
+    }
+}));
+app.use((0, http_proxy_middleware_1.createProxyMiddleware)({
+    target: ACTIVITY_LOGS_SERVICE_URL,
+    changeOrigin: true,
+    pathFilter: '/api/activity-logs',
+    pathRewrite: { '^/api/activity-logs': '/activity-logs' },
+    on: {
+        proxyReq: (proxyReq, req, _res) => {
+            const correlationId = req.headers['x-correlation-id'];
+            if (correlationId && typeof correlationId === 'string') {
+                proxyReq.setHeader('x-correlation-id', correlationId);
+            }
+        }
+    }
+}));
+app.use((0, http_proxy_middleware_1.createProxyMiddleware)({
+    target: USER_SESSIONS_SERVICE_URL,
+    changeOrigin: true,
+    pathFilter: '/api/sessions',
+    pathRewrite: { '^/api/sessions': '/sessions' },
     on: {
         proxyReq: (proxyReq, req, _res) => {
             const correlationId = req.headers['x-correlation-id'];

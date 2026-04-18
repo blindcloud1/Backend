@@ -31,6 +31,13 @@ This publishes images to GHCR:
 - `ghcr.io/blindcloud1/blindscloud-billing-service:latest`
 - `ghcr.io/blindcloud1/blindscloud-notifications-service:latest`
 - `ghcr.io/blindcloud1/blindscloud-files-service:latest`
+- `ghcr.io/blindcloud1/blindscloud-orders-service:latest`
+- `ghcr.io/blindcloud1/blindscloud-demo-requests-service:latest`
+- `ghcr.io/blindcloud1/blindscloud-module-permissions-service:latest`
+- `ghcr.io/blindcloud1/blindscloud-models3d-service:latest`
+- `ghcr.io/blindcloud1/blindscloud-model-permissions-service:latest`
+- `ghcr.io/blindcloud1/blindscloud-activity-logs-service:latest`
+- `ghcr.io/blindcloud1/blindscloud-user-sessions-service:latest`
 
 ## Step 3: Configure `.env` on VPS
 
@@ -70,6 +77,13 @@ curl -sS http://localhost:3001/api/pricing-tables/health
 curl -sS http://localhost:3001/api/billing/health
 curl -sS http://localhost:3001/api/notifications/health
 curl -sS http://localhost:3001/api/files/health
+curl -sS http://localhost:3001/api/orders/health
+curl -sS http://localhost:3001/api/demo-requests/health
+curl -sS http://localhost:3001/api/module-permissions/health
+curl -sS http://localhost:3001/api/models-3d/health
+curl -sS http://localhost:3001/api/model-permissions/health
+curl -sS http://localhost:3001/api/activity-logs/health
+curl -sS http://localhost:3001/api/sessions/health
 ```
 
 ## Notes
@@ -79,4 +93,3 @@ curl -sS http://localhost:3001/api/files/health
 - Data persistence is via Docker volumes:
   - `mongo-data` for MongoDB
   - `uploads-data` for uploaded files
-
