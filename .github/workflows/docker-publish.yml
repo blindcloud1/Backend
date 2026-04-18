@@ -49,6 +49,12 @@ jobs:
           - service: files-service
             dockerfile: services/files-service/Dockerfile
             image: ghcr.io/${{ github.repository_owner }}/blindscloud-files-service
+          - service: orders-service
+            dockerfile: services/orders-service/Dockerfile
+            image: ghcr.io/${{ github.repository_owner }}/blindscloud-orders-service
+          - service: demo-requests-service
+            dockerfile: services/demo-requests-service/Dockerfile
+            image: ghcr.io/${{ github.repository_owner }}/blindscloud-demo-requests-service
 
     steps:
       - uses: actions/checkout@v4
@@ -71,4 +77,3 @@ jobs:
             ${{ matrix.image }}:${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-

@@ -2,6 +2,7 @@ import dotenv from 'dotenv';
 import express, { Request, Response, NextFunction } from 'express';
 import helmet from 'helmet';
 import { body, validationResult } from 'express-validator';
+import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { MongoClient } from 'mongodb';
 import crypto from 'crypto';
@@ -106,7 +107,12 @@ app.post(
   '/users',
   authenticate,
   requireAdminOrBusiness,
-  [body('email').isEmail().normalizeEmail(), body('name').isLength({ min: 1 }), body('role').isString()],
+  [
+    body('email').isEmail().normalizeEmail(),
+    body('name').isLength({ min: 1 }),
+    body('role').isString(),
+    body('password').isLength({ min: 8 })
+  ],
   async (req: AuthRequest, res: Response) => {
     const errors = validationResult(req);
     if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
@@ -116,18 +122,38 @@ app.post(
 
     const role = req.user!.role.toLowerCase();
     const payload = req.body as Partial<UserDoc> & { password?: string };
+    const createdRole = String(payload.role || 'employee').toLowerCase();
+    const allowedRoles = new Set(['admin', 'business', 'employee', 'merchant']);
+    if (!allowedRoles.has(createdRole)) return res.status(400).json({ error: 'Invalid role' });
+
+    const password = String(payload.password || '');
+    if (!password) return res.status(400).json({ error: 'Password is required' });
+    const passwordHash = await bcrypt.hash(password, 10);
+
+    const now = new Date();
+    const businessId = role === 'admin' ? payload.businessId : currentUser.businessId;
+    if (createdRole !== 'admin' && (!businessId || typeof businessId !== 'string')) {
+      return res.status(400).json({ error: 'businessId is required for this role' });
+    }
+    if ((createdRole === 'employee' || createdRole === 'merchant') && role === 'admin' && (!payload.parentId || typeof payload.parentId !== 'string')) {
+      return res.status(400).json({ error: 'parentId is required for employee/merchant' });
+    }
 
     const newUser: UserDoc = {
       _id: crypto.randomUUID(),
       email: String(payload.email || '').toLowerCase(),
       name: String(payload.name || ''),
-      role: (String(payload.role || 'employee').toLowerCase() as any),
-      businessId: role === 'admin' ? payload.businessId : currentUser.businessId,
-      parentId: role === 'admin' ? payload.parentId : currentUser._id,
+      passwordHash,
+      role: createdRole as any,
+      businessId: createdRole === 'admin' ? undefined : (businessId as any),
+      parentId: role === 'admin' ? (payload.parentId || req.user!.id) : currentUser._id,
       permissions: Array.isArray(payload.permissions) ? payload.permissions : [],
       isActive: payload.isActive ?? true,
       emailVerified: payload.emailVerified ?? false,
-      createdAt: new Date()
+      address: payload.address,
+      createdBy: req.user!.id,
+      createdAt: now,
+      updatedAt: now
     };
 
     const existing = await usersCollection().findOne({ email: newUser.email });
@@ -174,11 +200,18 @@ app.put('/users/:id', authenticate, requireAdminOrBusiness, async (req: AuthRequ
     return res.status(403).json({ error: 'Insufficient permissions' });
   }
 
-  const updates = req.body as Partial<UserDoc>;
+  const updates = req.body as Partial<UserDoc> & { password?: string };
   delete (updates as any)._id;
   delete (updates as any).createdAt;
+  delete (updates as any).createdBy;
 
-  await usersCollection().updateOne({ _id: targetId }, { $set: updates });
+  if (typeof updates.password === 'string' && updates.password.length >= 8) {
+    (updates as any).passwordHash = await bcrypt.hash(updates.password, 10);
+  }
+  delete (updates as any).password;
+  updates.updatedAt = new Date();
+
+  await usersCollection().updateOne({ _id: targetId }, { $set: updates } as any);
 
   const event: CloudEvent<{ userId: string }> = {
     id: crypto.randomUUID(),

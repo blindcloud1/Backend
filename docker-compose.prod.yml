@@ -188,6 +188,38 @@ services:
     networks:
       - blindscloud-net
 
+  orders-service:
+    image: ghcr.io/blindcloud1/blindscloud-orders-service:latest
+    container_name: blindscloud-orders-service
+    restart: unless-stopped
+    environment:
+      PORT: 4011
+      JWT_SECRET: ${JWT_SECRET:-dev-secret-change}
+      MONGO_URL: ${MONGO_URL:-mongodb://${MONGO_ROOT_USER:-admin}:${MONGO_ROOT_PASSWORD:-change-me}@mongo:27017/admin}
+      RABBITMQ_URL: ${RABBITMQ_URL:-amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-change-me}@rabbitmq:5672}
+      EVENT_EXCHANGE: ${EVENT_EXCHANGE:-blindscloud.events}
+    depends_on:
+      - mongo
+      - rabbitmq
+    networks:
+      - blindscloud-net
+
+  demo-requests-service:
+    image: ghcr.io/blindcloud1/blindscloud-demo-requests-service:latest
+    container_name: blindscloud-demo-requests-service
+    restart: unless-stopped
+    environment:
+      PORT: 4012
+      JWT_SECRET: ${JWT_SECRET:-dev-secret-change}
+      MONGO_URL: ${MONGO_URL:-mongodb://${MONGO_ROOT_USER:-admin}:${MONGO_ROOT_PASSWORD:-change-me}@mongo:27017/admin}
+      RABBITMQ_URL: ${RABBITMQ_URL:-amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-change-me}@rabbitmq:5672}
+      EVENT_EXCHANGE: ${EVENT_EXCHANGE:-blindscloud.events}
+    depends_on:
+      - mongo
+      - rabbitmq
+    networks:
+      - blindscloud-net
+
   api-gateway:
     image: ghcr.io/blindcloud1/blindscloud-api-gateway:latest
     container_name: blindscloud-api-gateway
@@ -205,6 +237,8 @@ services:
       BILLING_SERVICE_URL: http://billing-service:4008
       NOTIFICATIONS_SERVICE_URL: http://notifications-service:4009
       FILES_SERVICE_URL: http://files-service:4010
+      ORDERS_SERVICE_URL: http://orders-service:4011
+      DEMO_REQUESTS_SERVICE_URL: http://demo-requests-service:4012
     ports:
       - "3001:3001"
     depends_on:
@@ -218,6 +252,8 @@ services:
       - billing-service
       - notifications-service
       - files-service
+      - orders-service
+      - demo-requests-service
     networks:
       - blindscloud-net
 
@@ -228,4 +264,3 @@ networks:
 volumes:
   mongo-data:
   uploads-data:
-

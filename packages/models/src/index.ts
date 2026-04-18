@@ -3,6 +3,7 @@ export type IsoDateString = string;
 
 export type UserRole = 'admin' | 'business' | 'employee' | 'merchant';
 export type BusinessSubscriptionTier = 'basic' | 'premium' | 'enterprise';
+export type BusinessSize = 'small' | 'medium' | 'large';
 export type JobStatus =
   | 'pending'
   | 'confirmed'
@@ -12,6 +13,8 @@ export type JobStatus =
   | 'tbd'
   | 'awaiting-deposit'
   | 'awaiting-payment';
+export type OrderUnit = 'cm' | 'inch' | 'mm';
+export type OrderStatus = 'pending' | 'accepted' | 'ready' | 'delivered' | 'cancelled';
 export type NotificationType =
   | 'reminder'
   | 'job'
@@ -42,7 +45,7 @@ export type UserDoc = DbDocBase &
   DbTimestamps & {
     email: string;
     name: string;
-    passwordHash?: string;
+    passwordHash: string;
     role: UserRole;
     businessId?: string;
     parentId?: string;
@@ -50,6 +53,7 @@ export type UserDoc = DbDocBase &
     isActive: boolean;
     emailVerified: boolean;
     verificationToken?: string;
+    address?: string;
     createdBy?: string;
     lastLoginAt?: Date;
     lastLogoutAt?: Date;
@@ -66,6 +70,9 @@ export type BusinessDoc = DbDocBase &
     subscription: BusinessSubscriptionTier;
     vrViewEnabled: boolean;
     logo?: string;
+    vatNumber?: string;
+    vatPercentage?: number;
+    termsAndConditions?: string;
   };
 
 export type CustomerDoc = DbDocBase &
@@ -86,13 +93,29 @@ export type JobDoc = DbDocBase &
     title: string;
     description?: string;
     status: JobStatus;
+    jobType?: string;
     customerId: string;
     employeeId?: string;
     businessId: string;
     scheduledDate: Date;
+    scheduledTime?: string;
     completedDate?: Date;
     quotation: number;
     invoice: number;
+    currency?: string;
+    notes?: string;
+    deposit?: number;
+    depositPaid?: boolean;
+    paymentMethod?: string;
+    customerReference?: string;
+    quotationSent?: boolean;
+    startTime?: Date;
+    endTime?: Date;
+    measurements?: Record<string, unknown>;
+    selectedProducts?: Record<string, unknown>;
+    jobHistory?: Record<string, unknown>[];
+    parentJobId?: string;
+    currentStep?: string;
     signature?: string;
     images: string[];
     documents: string[];
@@ -105,11 +128,14 @@ export type ProductDoc = DbDocBase &
     category: string;
     description: string;
     image: string;
+    images?: string[];
     model3d: string;
     arModel: string;
     specifications: string[];
     price: number;
     isActive: boolean;
+    businessId?: string;
+    pricingTableId?: string;
   };
 
 export type NotificationDoc = DbDocBase & {
@@ -227,19 +253,25 @@ export type PricingTableDoc = DbDocBase &
     priceMatrix: number[][];
     metadata: Record<string, unknown>;
     isDefault: boolean;
+    productId?: string;
   };
 
 export type MeasurementDoc = DbDocBase &
   DbTimestamps & {
     jobId: string;
     productId?: string;
+    pricingTableId?: string;
     windowId: string;
     width: number;
     height: number;
+    originalWidth?: number;
+    originalHeight?: number;
+    originalUnit?: string;
     notes?: string;
     location?: string;
     controlType?: string;
     bracketType?: string;
+    tiltControlType?: string;
   };
 
 export type JobImageDoc = DbDocBase &
@@ -276,5 +308,38 @@ export type FileDoc = DbDocBase & {
   storagePath: string;
   jobId?: string;
   productId?: string;
+  createdAt: Date;
+};
+
+export type OrderDoc = DbDocBase &
+  DbTimestamps & {
+    businessId: string;
+    merchantId: string;
+    createdByUserId: string;
+    windowName: string;
+    productId?: string;
+    productName: string;
+    category?: string;
+    width: number;
+    height: number;
+    unit: OrderUnit;
+    total: number;
+    currency: string;
+    manualPricing: boolean;
+    status: OrderStatus;
+    seenByBusiness: boolean;
+    note?: string;
+    acceptedAt?: Date;
+    readyAt?: Date;
+    deliveredAt?: Date;
+    editedAt?: Date;
+  };
+
+export type DemoRequestDoc = DbDocBase & {
+  name: string;
+  companyName?: string;
+  businessSize: BusinessSize;
+  phone?: string;
+  email: string;
   createdAt: Date;
 };

@@ -7,6 +7,7 @@ const dotenv_1 = __importDefault(require("dotenv"));
 const express_1 = __importDefault(require("express"));
 const helmet_1 = __importDefault(require("helmet"));
 const express_validator_1 = require("express-validator");
+const bcryptjs_1 = __importDefault(require("bcryptjs"));
 const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const mongodb_1 = require("mongodb");
 const crypto_1 = __importDefault(require("crypto"));
@@ -91,7 +92,12 @@ app.get('/users', authenticate, async (req, res) => {
         createdAt: u.createdAt.toISOString()
     })));
 });
-app.post('/users', authenticate, requireAdminOrBusiness, [(0, express_validator_1.body)('email').isEmail().normalizeEmail(), (0, express_validator_1.body)('name').isLength({ min: 1 }), (0, express_validator_1.body)('role').isString()], async (req, res) => {
+app.post('/users', authenticate, requireAdminOrBusiness, [
+    (0, express_validator_1.body)('email').isEmail().normalizeEmail(),
+    (0, express_validator_1.body)('name').isLength({ min: 1 }),
+    (0, express_validator_1.body)('role').isString(),
+    (0, express_validator_1.body)('password').isLength({ min: 8 })
+], async (req, res) => {
     const errors = (0, express_validator_1.validationResult)(req);
     if (!errors.isEmpty())
         return res.status(400).json({ errors: errors.array() });
@@ -100,17 +106,37 @@ app.post('/users', authenticate, requireAdminOrBusiness, [(0, express_validator_
         return res.status(401).json({ error: 'User not found' });
     const role = req.user.role.toLowerCase();
     const payload = req.body;
+    const createdRole = String(payload.role || 'employee').toLowerCase();
+    const allowedRoles = new Set(['admin', 'business', 'employee', 'merchant']);
+    if (!allowedRoles.has(createdRole))
+        return res.status(400).json({ error: 'Invalid role' });
+    const password = String(payload.password || '');
+    if (!password)
+        return res.status(400).json({ error: 'Password is required' });
+    const passwordHash = await bcryptjs_1.default.hash(password, 10);
+    const now = new Date();
+    const businessId = role === 'admin' ? payload.businessId : currentUser.businessId;
+    if (createdRole !== 'admin' && (!businessId || typeof businessId !== 'string')) {
+        return res.status(400).json({ error: 'businessId is required for this role' });
+    }
+    if ((createdRole === 'employee' || createdRole === 'merchant') && role === 'admin' && (!payload.parentId || typeof payload.parentId !== 'string')) {
+        return res.status(400).json({ error: 'parentId is required for employee/merchant' });
+    }
     const newUser = {
         _id: crypto_1.default.randomUUID(),
         email: String(payload.email || '').toLowerCase(),
         name: String(payload.name || ''),
-        role: String(payload.role || 'employee').toLowerCase(),
-        businessId: role === 'admin' ? payload.businessId : currentUser.businessId,
-        parentId: role === 'admin' ? payload.parentId : currentUser._id,
+        passwordHash,
+        role: createdRole,
+        businessId: createdRole === 'admin' ? undefined : businessId,
+        parentId: role === 'admin' ? (payload.parentId || req.user.id) : currentUser._id,
         permissions: Array.isArray(payload.permissions) ? payload.permissions : [],
         isActive: payload.isActive ?? true,
         emailVerified: payload.emailVerified ?? false,
-        createdAt: new Date()
+        address: payload.address,
+        createdBy: req.user.id,
+        createdAt: now,
+        updatedAt: now
     };
     const existing = await usersCollection().findOne({ email: newUser.email });
     if (existing)
@@ -154,6 +180,12 @@ app.put('/users/:id', authenticate, requireAdminOrBusiness, async (req, res) => 
     const updates = req.body;
     delete updates._id;
     delete updates.createdAt;
+    delete updates.createdBy;
+    if (typeof updates.password === 'string' && updates.password.length >= 8) {
+        updates.passwordHash = await bcryptjs_1.default.hash(updates.password, 10);
+    }
+    delete updates.password;
+    updates.updatedAt = new Date();
     await usersCollection().updateOne({ _id: targetId }, { $set: updates });
     const event = {
         id: crypto_1.default.randomUUID(),
