@@ -1,0 +1,74 @@
+name: Docker Publish
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - service: api-gateway
+            dockerfile: services/api-gateway/Dockerfile
+            image: ghcr.io/${{ github.repository_owner }}/blindscloud-api-gateway
+          - service: auth-service
+            dockerfile: services/auth-service/Dockerfile
+            image: ghcr.io/${{ github.repository_owner }}/blindscloud-auth-service
+          - service: users-service
+            dockerfile: services/users-service/Dockerfile
+            image: ghcr.io/${{ github.repository_owner }}/blindscloud-users-service
+          - service: businesses-service
+            dockerfile: services/businesses-service/Dockerfile
+            image: ghcr.io/${{ github.repository_owner }}/blindscloud-businesses-service
+          - service: customers-service
+            dockerfile: services/customers-service/Dockerfile
+            image: ghcr.io/${{ github.repository_owner }}/blindscloud-customers-service
+          - service: jobs-service
+            dockerfile: services/jobs-service/Dockerfile
+            image: ghcr.io/${{ github.repository_owner }}/blindscloud-jobs-service
+          - service: products-service
+            dockerfile: services/products-service/Dockerfile
+            image: ghcr.io/${{ github.repository_owner }}/blindscloud-products-service
+          - service: pricing-service
+            dockerfile: services/pricing-service/Dockerfile
+            image: ghcr.io/${{ github.repository_owner }}/blindscloud-pricing-service
+          - service: billing-service
+            dockerfile: services/billing-service/Dockerfile
+            image: ghcr.io/${{ github.repository_owner }}/blindscloud-billing-service
+          - service: notifications-service
+            dockerfile: services/notifications-service/Dockerfile
+            image: ghcr.io/${{ github.repository_owner }}/blindscloud-notifications-service
+          - service: files-service
+            dockerfile: services/files-service/Dockerfile
+            image: ghcr.io/${{ github.repository_owner }}/blindscloud-files-service
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          push: true
+          tags: |
+            ${{ matrix.image }}:latest
+            ${{ matrix.image }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+

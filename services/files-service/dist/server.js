@@ -34,6 +34,9 @@ const eventBus = new event_bus_1.EventBus({
     serviceName: 'files-service'
 });
 const filesCollection = () => mongo.db('blindscloud').collection('files');
+const usersCollection = () => mongo.db('blindscloud').collection('users');
+const jobsCollection = () => mongo.db('blindscloud').collection('jobs');
+const imagesCollection = () => mongo.db('blindscloud').collection('images');
 const authenticate = (req, res, next) => {
     const header = req.header('authorization') || req.header('Authorization');
     if (!header)
@@ -98,6 +101,24 @@ app.post('/files', authenticate, upload.single('file'), async (req, res) => {
     const file = req.file;
     if (!file)
         return res.status(400).json({ error: 'Missing file' });
+    const jobId = typeof req.body.jobId === 'string' ? req.body.jobId : undefined;
+    const productId = typeof req.body.productId === 'string' ? req.body.productId : undefined;
+    const isAdmin = req.user.role.toLowerCase() === 'admin';
+    let job = null;
+    let currentUser = null;
+    if (jobId) {
+        job = await jobsCollection().findOne({ _id: jobId });
+        if (!job)
+            return res.status(400).json({ error: 'Invalid jobId' });
+        if (!isAdmin) {
+            currentUser = await usersCollection().findOne({ _id: req.user.id });
+            if (!currentUser)
+                return res.status(401).json({ error: 'User not found' });
+            if (!currentUser.businessId || currentUser.businessId !== job.businessId) {
+                return res.status(403).json({ error: 'Insufficient permissions' });
+            }
+        }
+    }
     const now = new Date();
     const doc = {
         _id: crypto_1.default.randomUUID(),
@@ -106,11 +127,26 @@ app.post('/files', authenticate, upload.single('file'), async (req, res) => {
         mimeType: file.mimetype,
         sizeBytes: file.size,
         storagePath: file.path,
-        jobId: typeof req.body.jobId === 'string' ? req.body.jobId : undefined,
-        productId: typeof req.body.productId === 'string' ? req.body.productId : undefined,
+        jobId,
+        productId,
         createdAt: now
     };
     await filesCollection().insertOne(doc);
+    const fileResponse = toFileResponse(doc);
+    if (job) {
+        const imageType = typeof req.body.imageType === 'string' ? req.body.imageType : 'upload';
+        const displayOrder = typeof req.body.displayOrder === 'string' ? Number(req.body.displayOrder) : 0;
+        const image = {
+            _id: crypto_1.default.randomUUID(),
+            jobId: job._id,
+            imageUrl: fileResponse.url,
+            imageType,
+            displayOrder: Number.isFinite(displayOrder) ? displayOrder : 0,
+            createdAt: now,
+            updatedAt: now
+        };
+        await imagesCollection().insertOne(image);
+    }
     const event = {
         id: crypto_1.default.randomUUID(),
         type: 'files.uploaded',
@@ -121,7 +157,7 @@ app.post('/files', authenticate, upload.single('file'), async (req, res) => {
         payload: { fileId: doc._id, ownerId: doc.ownerId, jobId: doc.jobId, productId: doc.productId }
     };
     await eventBus.publish('files.uploaded', event);
-    res.status(201).json(toFileResponse(doc));
+    res.status(201).json(fileResponse);
 });
 app.get('/files', authenticate, async (req, res) => {
     const filter = { ownerId: req.user.id };

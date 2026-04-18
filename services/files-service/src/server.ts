@@ -8,7 +8,7 @@ import path from 'path';
 import fs from 'fs';
 import multer from 'multer';
 import { EventBus, type CloudEvent } from '@blindscloud/event-bus';
-import type { FileDoc, UserRole } from '@blindscloud/models';
+import type { FileDoc, JobDoc, JobImageDoc, UserDoc, UserRole } from '@blindscloud/models';
 
 dotenv.config();
 
@@ -35,6 +35,9 @@ const eventBus = new EventBus({
 });
 
 const filesCollection = () => mongo.db('blindscloud').collection<FileDoc>('files');
+const usersCollection = () => mongo.db('blindscloud').collection<UserDoc>('users');
+const jobsCollection = () => mongo.db('blindscloud').collection<JobDoc>('jobs');
+const imagesCollection = () => mongo.db('blindscloud').collection<JobImageDoc>('images');
 
 const authenticate = (req: AuthRequest, res: Response, next: NextFunction) => {
   const header = req.header('authorization') || req.header('Authorization');
@@ -104,6 +107,25 @@ app.post('/files', authenticate, upload.single('file'), async (req: AuthRequest,
   const file = (req as any).file as Express.Multer.File | undefined;
   if (!file) return res.status(400).json({ error: 'Missing file' });
 
+  const jobId = typeof req.body.jobId === 'string' ? req.body.jobId : undefined;
+  const productId = typeof req.body.productId === 'string' ? req.body.productId : undefined;
+  const isAdmin = req.user!.role.toLowerCase() === 'admin';
+
+  let job: JobDoc | null = null;
+  let currentUser: UserDoc | null = null;
+  if (jobId) {
+    job = await jobsCollection().findOne({ _id: jobId } as any);
+    if (!job) return res.status(400).json({ error: 'Invalid jobId' });
+
+    if (!isAdmin) {
+      currentUser = await usersCollection().findOne({ _id: req.user!.id } as any);
+      if (!currentUser) return res.status(401).json({ error: 'User not found' });
+      if (!currentUser.businessId || currentUser.businessId !== job.businessId) {
+        return res.status(403).json({ error: 'Insufficient permissions' });
+      }
+    }
+  }
+
   const now = new Date();
   const doc: FileDoc = {
     _id: crypto.randomUUID(),
@@ -112,12 +134,29 @@ app.post('/files', authenticate, upload.single('file'), async (req: AuthRequest,
     mimeType: file.mimetype,
     sizeBytes: file.size,
     storagePath: file.path,
-    jobId: typeof req.body.jobId === 'string' ? req.body.jobId : undefined,
-    productId: typeof req.body.productId === 'string' ? req.body.productId : undefined,
+    jobId,
+    productId,
     createdAt: now
   };
 
   await filesCollection().insertOne(doc as any);
+
+  const fileResponse = toFileResponse(doc);
+
+  if (job) {
+    const imageType = typeof req.body.imageType === 'string' ? req.body.imageType : 'upload';
+    const displayOrder = typeof req.body.displayOrder === 'string' ? Number(req.body.displayOrder) : 0;
+    const image: JobImageDoc = {
+      _id: crypto.randomUUID(),
+      jobId: job._id,
+      imageUrl: fileResponse.url,
+      imageType,
+      displayOrder: Number.isFinite(displayOrder) ? displayOrder : 0,
+      createdAt: now,
+      updatedAt: now
+    };
+    await imagesCollection().insertOne(image as any);
+  }
 
   const event: CloudEvent<{ fileId: string; ownerId: string; jobId?: string; productId?: string }> = {
     id: crypto.randomUUID(),
@@ -130,7 +169,7 @@ app.post('/files', authenticate, upload.single('file'), async (req: AuthRequest,
   };
   await eventBus.publish('files.uploaded', event);
 
-  res.status(201).json(toFileResponse(doc));
+  res.status(201).json(fileResponse);
 });
 
 app.get('/files', authenticate, async (req: AuthRequest, res: Response) => {
@@ -192,4 +231,3 @@ app.listen(PORT, '0.0.0.0', async () => {
   await eventBus.connect();
   await ensureUploadDir();
 });
-

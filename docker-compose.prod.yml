@@ -1,0 +1,231 @@
+services:
+  mongo:
+    image: mongo:7
+    container_name: blindscloud-mongo
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USER:-admin}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:-change-me}
+    volumes:
+      - mongo-data:/data/db
+    networks:
+      - blindscloud-net
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: blindscloud-rabbitmq
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-admin}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-change-me}
+    ports:
+      - "127.0.0.1:15672:15672"
+    networks:
+      - blindscloud-net
+
+  auth-service:
+    image: ghcr.io/blindcloud1/blindscloud-auth-service:latest
+    container_name: blindscloud-auth-service
+    restart: unless-stopped
+    environment:
+      PORT: 4001
+      JWT_SECRET: ${JWT_SECRET:-dev-secret-change}
+      MONGO_URL: ${MONGO_URL:-mongodb://${MONGO_ROOT_USER:-admin}:${MONGO_ROOT_PASSWORD:-change-me}@mongo:27017/admin}
+      RABBITMQ_URL: ${RABBITMQ_URL:-amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-change-me}@rabbitmq:5672}
+      EVENT_EXCHANGE: ${EVENT_EXCHANGE:-blindscloud.events}
+      SEED_DEMO: ${SEED_DEMO:-true}
+    depends_on:
+      - mongo
+      - rabbitmq
+    networks:
+      - blindscloud-net
+
+  users-service:
+    image: ghcr.io/blindcloud1/blindscloud-users-service:latest
+    container_name: blindscloud-users-service
+    restart: unless-stopped
+    environment:
+      PORT: 4002
+      JWT_SECRET: ${JWT_SECRET:-dev-secret-change}
+      MONGO_URL: ${MONGO_URL:-mongodb://${MONGO_ROOT_USER:-admin}:${MONGO_ROOT_PASSWORD:-change-me}@mongo:27017/admin}
+      RABBITMQ_URL: ${RABBITMQ_URL:-amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-change-me}@rabbitmq:5672}
+      EVENT_EXCHANGE: ${EVENT_EXCHANGE:-blindscloud.events}
+    depends_on:
+      - mongo
+      - rabbitmq
+    networks:
+      - blindscloud-net
+
+  businesses-service:
+    image: ghcr.io/blindcloud1/blindscloud-businesses-service:latest
+    container_name: blindscloud-businesses-service
+    restart: unless-stopped
+    environment:
+      PORT: 4003
+      JWT_SECRET: ${JWT_SECRET:-dev-secret-change}
+      MONGO_URL: ${MONGO_URL:-mongodb://${MONGO_ROOT_USER:-admin}:${MONGO_ROOT_PASSWORD:-change-me}@mongo:27017/admin}
+      RABBITMQ_URL: ${RABBITMQ_URL:-amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-change-me}@rabbitmq:5672}
+      EVENT_EXCHANGE: ${EVENT_EXCHANGE:-blindscloud.events}
+    depends_on:
+      - mongo
+      - rabbitmq
+    networks:
+      - blindscloud-net
+
+  customers-service:
+    image: ghcr.io/blindcloud1/blindscloud-customers-service:latest
+    container_name: blindscloud-customers-service
+    restart: unless-stopped
+    environment:
+      PORT: 4004
+      JWT_SECRET: ${JWT_SECRET:-dev-secret-change}
+      MONGO_URL: ${MONGO_URL:-mongodb://${MONGO_ROOT_USER:-admin}:${MONGO_ROOT_PASSWORD:-change-me}@mongo:27017/admin}
+      RABBITMQ_URL: ${RABBITMQ_URL:-amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-change-me}@rabbitmq:5672}
+      EVENT_EXCHANGE: ${EVENT_EXCHANGE:-blindscloud.events}
+    depends_on:
+      - mongo
+      - rabbitmq
+    networks:
+      - blindscloud-net
+
+  jobs-service:
+    image: ghcr.io/blindcloud1/blindscloud-jobs-service:latest
+    container_name: blindscloud-jobs-service
+    restart: unless-stopped
+    environment:
+      PORT: 4005
+      JWT_SECRET: ${JWT_SECRET:-dev-secret-change}
+      MONGO_URL: ${MONGO_URL:-mongodb://${MONGO_ROOT_USER:-admin}:${MONGO_ROOT_PASSWORD:-change-me}@mongo:27017/admin}
+      RABBITMQ_URL: ${RABBITMQ_URL:-amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-change-me}@rabbitmq:5672}
+      EVENT_EXCHANGE: ${EVENT_EXCHANGE:-blindscloud.events}
+    depends_on:
+      - mongo
+      - rabbitmq
+    networks:
+      - blindscloud-net
+
+  products-service:
+    image: ghcr.io/blindcloud1/blindscloud-products-service:latest
+    container_name: blindscloud-products-service
+    restart: unless-stopped
+    environment:
+      PORT: 4006
+      JWT_SECRET: ${JWT_SECRET:-dev-secret-change}
+      MONGO_URL: ${MONGO_URL:-mongodb://${MONGO_ROOT_USER:-admin}:${MONGO_ROOT_PASSWORD:-change-me}@mongo:27017/admin}
+      RABBITMQ_URL: ${RABBITMQ_URL:-amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-change-me}@rabbitmq:5672}
+      EVENT_EXCHANGE: ${EVENT_EXCHANGE:-blindscloud.events}
+    depends_on:
+      - mongo
+      - rabbitmq
+    networks:
+      - blindscloud-net
+
+  pricing-service:
+    image: ghcr.io/blindcloud1/blindscloud-pricing-service:latest
+    container_name: blindscloud-pricing-service
+    restart: unless-stopped
+    environment:
+      PORT: 4007
+      JWT_SECRET: ${JWT_SECRET:-dev-secret-change}
+      MONGO_URL: ${MONGO_URL:-mongodb://${MONGO_ROOT_USER:-admin}:${MONGO_ROOT_PASSWORD:-change-me}@mongo:27017/admin}
+      RABBITMQ_URL: ${RABBITMQ_URL:-amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-change-me}@rabbitmq:5672}
+      EVENT_EXCHANGE: ${EVENT_EXCHANGE:-blindscloud.events}
+    depends_on:
+      - mongo
+      - rabbitmq
+    networks:
+      - blindscloud-net
+
+  billing-service:
+    image: ghcr.io/blindcloud1/blindscloud-billing-service:latest
+    container_name: blindscloud-billing-service
+    restart: unless-stopped
+    environment:
+      PORT: 4008
+      JWT_SECRET: ${JWT_SECRET:-dev-secret-change}
+      MONGO_URL: ${MONGO_URL:-mongodb://${MONGO_ROOT_USER:-admin}:${MONGO_ROOT_PASSWORD:-change-me}@mongo:27017/admin}
+      RABBITMQ_URL: ${RABBITMQ_URL:-amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-change-me}@rabbitmq:5672}
+      EVENT_EXCHANGE: ${EVENT_EXCHANGE:-blindscloud.events}
+    depends_on:
+      - mongo
+      - rabbitmq
+    networks:
+      - blindscloud-net
+
+  notifications-service:
+    image: ghcr.io/blindcloud1/blindscloud-notifications-service:latest
+    container_name: blindscloud-notifications-service
+    restart: unless-stopped
+    environment:
+      PORT: 4009
+      JWT_SECRET: ${JWT_SECRET:-dev-secret-change}
+      MONGO_URL: ${MONGO_URL:-mongodb://${MONGO_ROOT_USER:-admin}:${MONGO_ROOT_PASSWORD:-change-me}@mongo:27017/admin}
+      RABBITMQ_URL: ${RABBITMQ_URL:-amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-change-me}@rabbitmq:5672}
+      EVENT_EXCHANGE: ${EVENT_EXCHANGE:-blindscloud.events}
+    depends_on:
+      - mongo
+      - rabbitmq
+    networks:
+      - blindscloud-net
+
+  files-service:
+    image: ghcr.io/blindcloud1/blindscloud-files-service:latest
+    container_name: blindscloud-files-service
+    restart: unless-stopped
+    environment:
+      PORT: 4010
+      JWT_SECRET: ${JWT_SECRET:-dev-secret-change}
+      MONGO_URL: ${MONGO_URL:-mongodb://${MONGO_ROOT_USER:-admin}:${MONGO_ROOT_PASSWORD:-change-me}@mongo:27017/admin}
+      RABBITMQ_URL: ${RABBITMQ_URL:-amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-change-me}@rabbitmq:5672}
+      EVENT_EXCHANGE: ${EVENT_EXCHANGE:-blindscloud.events}
+      UPLOAD_DIR: /data/uploads
+      FILES_BASE_URL: ${FILES_BASE_URL:-}
+    volumes:
+      - uploads-data:/data/uploads
+    depends_on:
+      - mongo
+      - rabbitmq
+    networks:
+      - blindscloud-net
+
+  api-gateway:
+    image: ghcr.io/blindcloud1/blindscloud-api-gateway:latest
+    container_name: blindscloud-api-gateway
+    restart: unless-stopped
+    environment:
+      PORT: 3001
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173}
+      AUTH_SERVICE_URL: http://auth-service:4001
+      USERS_SERVICE_URL: http://users-service:4002
+      BUSINESSES_SERVICE_URL: http://businesses-service:4003
+      CUSTOMERS_SERVICE_URL: http://customers-service:4004
+      JOBS_SERVICE_URL: http://jobs-service:4005
+      PRODUCTS_SERVICE_URL: http://products-service:4006
+      PRICING_SERVICE_URL: http://pricing-service:4007
+      BILLING_SERVICE_URL: http://billing-service:4008
+      NOTIFICATIONS_SERVICE_URL: http://notifications-service:4009
+      FILES_SERVICE_URL: http://files-service:4010
+    ports:
+      - "3001:3001"
+    depends_on:
+      - auth-service
+      - users-service
+      - businesses-service
+      - customers-service
+      - jobs-service
+      - products-service
+      - pricing-service
+      - billing-service
+      - notifications-service
+      - files-service
+    networks:
+      - blindscloud-net
+
+networks:
+  blindscloud-net:
+    driver: bridge
+
+volumes:
+  mongo-data:
+  uploads-data:
+
