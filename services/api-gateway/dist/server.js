@@ -28,12 +28,35 @@ const MODEL_PERMISSIONS_SERVICE_URL = process.env.MODEL_PERMISSIONS_SERVICE_URL 
 const ACTIVITY_LOGS_SERVICE_URL = process.env.ACTIVITY_LOGS_SERVICE_URL || 'http://localhost:4016';
 const USER_SESSIONS_SERVICE_URL = process.env.USER_SESSIONS_SERVICE_URL || 'http://localhost:4017';
 const CORS_ORIGINS = (process.env.CORS_ORIGINS || '').split(',').map(s => s.trim()).filter(Boolean);
+const DEFAULT_ALLOWED_ORIGINS = [
+    'https://www.blindscloud.co.uk',
+    'https://blindscloud.co.uk',
+    'https://www.blindscloud.com',
+    'https://blindscloud.com',
+    'https://blind-cloud-blindcloud1s-projects.vercel.app'
+];
+const EFFECTIVE_ALLOWED_ORIGINS = CORS_ORIGINS.length > 0
+    ? CORS_ORIGINS
+    : (process.env.NODE_ENV === 'production' ? DEFAULT_ALLOWED_ORIGINS : []);
 const app = (0, express_1.default)();
-app.use((0, helmet_1.default)());
-app.use((0, cors_1.default)({
-    origin: CORS_ORIGINS.length > 0 ? CORS_ORIGINS : true,
-    credentials: true
-}));
+app.use((0, helmet_1.default)({ crossOriginResourcePolicy: false }));
+const corsOptions = {
+    origin: (origin, callback) => {
+        if (!origin)
+            return callback(null, true);
+        if (EFFECTIVE_ALLOWED_ORIGINS.length === 0)
+            return callback(null, true);
+        if (EFFECTIVE_ALLOWED_ORIGINS.includes(origin))
+            return callback(null, true);
+        return callback(null, false);
+    },
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Correlation-Id'],
+    optionsSuccessStatus: 204
+};
+app.use((0, cors_1.default)(corsOptions));
+app.options('*', (0, cors_1.default)(corsOptions));
 app.get('/health', (_req, res) => {
     res.json({ status: 'OK', service: 'api-gateway' });
 });
