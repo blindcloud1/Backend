@@ -33,9 +33,12 @@ const DEFAULT_ALLOWED_ORIGINS = [
   'https://blindscloud.com',
   'https://blind-cloud-blindcloud1s-projects.vercel.app'
 ];
-const EFFECTIVE_ALLOWED_ORIGINS = CORS_ORIGINS.length > 0
+
+const normalizeOrigin = (value: string): string => value.trim().replace(/\/+$/, '').toLowerCase();
+const EFFECTIVE_ALLOWED_ORIGINS = (CORS_ORIGINS.length > 0
   ? CORS_ORIGINS
-  : (process.env.NODE_ENV === 'production' ? DEFAULT_ALLOWED_ORIGINS : []);
+  : (process.env.NODE_ENV === 'production' ? DEFAULT_ALLOWED_ORIGINS : [])
+).map(normalizeOrigin);
 
 const app = express();
 app.use(helmet({ crossOriginResourcePolicy: false }));
@@ -44,7 +47,8 @@ const corsOptions = {
   origin: (origin, callback) => {
     if (!origin) return callback(null, true);
     if (EFFECTIVE_ALLOWED_ORIGINS.length === 0) return callback(null, true);
-    if (EFFECTIVE_ALLOWED_ORIGINS.includes(origin)) return callback(null, true);
+    const normalizedOrigin = normalizeOrigin(origin);
+    if (EFFECTIVE_ALLOWED_ORIGINS.includes(normalizedOrigin)) return callback(null, true);
     return callback(null, false);
   },
   credentials: true,
