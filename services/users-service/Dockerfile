@@ -2,12 +2,13 @@ FROM node:20-alpine AS base
 WORKDIR /app
 
 COPY package.json /app/package.json
+COPY package-lock.json /app/package-lock.json
 COPY tsconfig.base.json /app/tsconfig.base.json
 COPY packages/event-bus/package.json /app/packages/event-bus/package.json
 COPY packages/models/package.json /app/packages/models/package.json
 COPY services/users-service/package.json /app/services/users-service/package.json
 
-RUN npm install --workspaces --include-workspace-root
+RUN npm ci --workspaces --include-workspace-root
 
 COPY packages/event-bus /app/packages/event-bus
 COPY packages/models /app/packages/models
