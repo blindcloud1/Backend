@@ -152,6 +152,50 @@ app.get('/health', async (_req: Request, res: Response) => {
   }
 });
 
+app.post(
+  '/email/send',
+  authenticate,
+  requireAdminOrBusiness,
+  [
+    body('to').isEmail().normalizeEmail(),
+    body('subject').isLength({ min: 1 }),
+    body('html').optional().isString(),
+    body('text').optional().isString(),
+    body('htmlBody').optional().isString(),
+    body('textBody').optional().isString()
+  ],
+  async (req: AuthRequest, res: Response) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+
+    const payload = req.body as {
+      to: string;
+      subject: string;
+      html?: string;
+      text?: string;
+      htmlBody?: string;
+      textBody?: string;
+    };
+    const to = String(payload.to || '').toLowerCase();
+    const subject = String(payload.subject || '');
+    const rawHtml = typeof payload.html === 'string' ? payload.html : (typeof payload.htmlBody === 'string' ? payload.htmlBody : '');
+    const rawText = typeof payload.text === 'string' ? payload.text : (typeof payload.textBody === 'string' ? payload.textBody : '');
+
+    if (!rawHtml && !rawText) {
+      return res.status(400).json({ error: 'Either html or text is required' });
+    }
+
+    const escapeHtml = (value: string) =>
+      value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;');
+
+    const html = rawHtml || `<pre style="white-space: pre-wrap; font-family: Arial, sans-serif;">${escapeHtml(rawText)}</pre>`;
+    const text = rawText || rawHtml.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+
+    await sendSendGridMail({ to, subject, html, text });
+    res.json({ status: 'OK' });
+  }
+);
+
 app.get('/users', authenticate, async (req: AuthRequest, res: Response) => {
   const role = req.user!.role.toLowerCase();
 
