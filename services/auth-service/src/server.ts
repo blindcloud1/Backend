@@ -109,6 +109,67 @@ const handleLogin = async (req: Request, res: Response) => {
 app.post('/auth/login', loginValidators, handleLogin);
 app.post('/login', loginValidators, handleLogin);
 
+app.post(
+  '/auth/verify-email',
+  [body('token').isLength({ min: 1 }), body('email').optional().isEmail().normalizeEmail(), body('clearToken').optional().isBoolean()],
+  async (req: Request, res: Response) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+
+    const { token, email, clearToken } = req.body as { token: string; email?: string; clearToken?: boolean };
+    const users = getUsersCollection();
+
+    let user: UserDoc | null = null;
+    if (email) {
+      user = await users.findOne({ email: email.toLowerCase() });
+    }
+    if (!user) {
+      user = await users.findOne({ verificationToken: token } as any);
+    }
+
+    if (!user) return res.status(400).json({ error: 'Invalid or expired verification token' });
+    if (user.verificationToken && user.verificationToken !== token) {
+      return res.status(400).json({ error: 'Invalid or expired verification token' });
+    }
+
+    const updates: Partial<UserDoc> = {
+      emailVerified: true,
+      updatedAt: new Date()
+    };
+    if (clearToken !== false) {
+      (updates as any).verificationToken = undefined;
+    }
+
+    await users.updateOne({ _id: user._id }, { $set: updates } as any);
+
+    const event: CloudEvent<{ userId: string; email: string }> = {
+      id: crypto.randomUUID(),
+      type: 'auth.email.verified',
+      version: 1,
+      source: 'auth-service',
+      occurredAt: new Date().toISOString(),
+      correlationId: req.header('x-correlation-id') || undefined,
+      payload: { userId: String(user._id), email: user.email }
+    };
+    await eventBus.publish('auth.email.verified', event);
+
+    res.json({
+      status: 'OK',
+      user: {
+        id: String(user._id),
+        email: user.email,
+        name: user.name,
+        role: user.role,
+        businessId: user.businessId,
+        permissions: user.permissions,
+        isActive: user.isActive,
+        emailVerified: true,
+        createdAt: user.createdAt?.toISOString?.() || new Date().toISOString()
+      }
+    });
+  }
+);
+
 app.listen(PORT, '0.0.0.0', async () => {
   await mongo.connect();
   await eventBus.connect();

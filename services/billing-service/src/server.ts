@@ -105,6 +105,13 @@ const isValidPaymentStatus = (value: any): value is PaymentStatus => {
   return ['succeeded', 'failed', 'pending', 'refunded'].includes(String(value));
 };
 
+const toNullableNumberOrDefault = (value: any, defaultValue: number | null): number | null => {
+  if (value === null) return null;
+  if (value === undefined) return defaultValue;
+  const n = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(n) ? n : defaultValue;
+};
+
 const app = express();
 app.use(express.json({ limit: '2mb' }));
 app.use(helmet());
@@ -143,9 +150,12 @@ app.post(
       description: String(payload.description || ''),
       price: typeof payload.price === 'number' ? payload.price : Number(payload.price),
       features: Array.isArray(payload.features) ? payload.features : [],
-      maxEmployees: typeof payload.maxEmployees === 'number' ? payload.maxEmployees : 0,
-      maxJobs: typeof payload.maxJobs === 'number' ? payload.maxJobs : 0,
-      stripePriceId: payload.stripePriceId,
+      maxEmployees: toNullableNumberOrDefault(payload.maxEmployees, 0),
+      maxSubBusinessUsers: toNullableNumberOrDefault(payload.maxSubBusinessUsers, null),
+      maxProducts: toNullableNumberOrDefault(payload.maxProducts, null),
+      maxEmailsPerMonth: toNullableNumberOrDefault(payload.maxEmailsPerMonth, null),
+      maxJobs: toNullableNumberOrDefault(payload.maxJobs, 0),
+      stripePriceId: payload.stripePriceId ?? null,
       active: payload.active ?? true,
       createdAt: now,
       updatedAt: now
@@ -237,6 +247,84 @@ app.get('/subscriptions', authenticate, requireAdmin, async (req: AuthRequest, r
   const subs = await subsCollection().find(filter).sort({ createdAt: -1 }).toArray();
   res.json(subs.map(toSubResponse));
 });
+
+app.post(
+  '/subscriptions/grant',
+  authenticate,
+  requireAdmin,
+  [body('userId').isLength({ min: 1 }), body('planId').isLength({ min: 1 }), body('durationMonths').optional().isInt({ min: 1 })],
+  async (req: AuthRequest, res: Response) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+
+    const { userId, planId, durationMonths } = req.body as { userId: string; planId: string; durationMonths?: number };
+
+    const targetUser = await usersCollection().findOne({ _id: String(userId) } as any);
+    if (!targetUser) return res.status(404).json({ error: 'User not found' });
+
+    const plan = await plansCollection().findOne({ _id: String(planId) } as any);
+    if (!plan) return res.status(404).json({ error: 'Plan not found' });
+
+    const monthsRaw = typeof durationMonths === 'number' ? durationMonths : Number(durationMonths);
+    const months = Number.isFinite(monthsRaw) && monthsRaw > 0 ? Math.floor(monthsRaw) : 1;
+
+    const now = new Date();
+    const end = new Date(now);
+    end.setMonth(end.getMonth() + months);
+
+    const existingSub = await subsCollection().findOne(
+      { userId: String(userId) } as any,
+      { sort: { currentPeriodEnd: -1 } } as any
+    );
+
+    const subscription: UserSubscriptionDoc = existingSub
+      ? {
+          ...existingSub,
+          planId: String(planId),
+          status: 'active',
+          currentPeriodStart: now,
+          currentPeriodEnd: end,
+          cancelAtPeriodEnd: false,
+          grantedByAdmin: true,
+          grantedBy: req.user!.id,
+          updatedAt: now
+        }
+      : {
+          _id: crypto.randomUUID(),
+          userId: String(userId),
+          planId: String(planId),
+          status: 'active',
+          stripeCustomerId: undefined,
+          stripeSubscriptionId: undefined,
+          currentPeriodStart: now,
+          currentPeriodEnd: end,
+          cancelAtPeriodEnd: false,
+          grantedByAdmin: true,
+          grantedBy: req.user!.id,
+          createdAt: now,
+          updatedAt: now
+        };
+
+    if (existingSub) {
+      await subsCollection().updateOne({ _id: existingSub._id } as any, { $set: subscription } as any);
+    } else {
+      await subsCollection().insertOne(subscription as any);
+    }
+
+    const event: CloudEvent<{ subscriptionId: string; userId: string; planId: string; grantedBy: string }> = {
+      id: crypto.randomUUID(),
+      type: 'subscriptions.granted',
+      version: 1,
+      source: 'billing-service',
+      occurredAt: new Date().toISOString(),
+      correlationId: req.header('x-correlation-id') || undefined,
+      payload: { subscriptionId: subscription._id, userId: subscription.userId, planId: subscription.planId, grantedBy: req.user!.id }
+    };
+    await eventBus.publish('subscriptions.granted', event);
+
+    res.status(201).json(toSubResponse(subscription));
+  }
+);
 
 app.post(
   '/subscriptions/me',
@@ -386,7 +474,14 @@ app.put(
   '/custom-plan-config',
   authenticate,
   requireAdmin,
-  [body('jobPrice').optional().isNumeric(), body('productPrice').optional().isNumeric()],
+  [
+    body('jobPrice').optional().isNumeric(),
+    body('productPrice').optional().isNumeric(),
+    body('emailPrice').optional().isNumeric(),
+    body('userPrice').optional().isNumeric(),
+    body('storagePrice').optional().isNumeric(),
+    body('bannerDaysBeforeExpiry').optional().isInt({ min: 0 })
+  ],
   async (req: AuthRequest, res: Response) => {
     const errors = validationResult(req);
     if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
@@ -404,6 +499,8 @@ app.put(
           emailPrice: typeof payload.emailPrice === 'number' ? payload.emailPrice : 0,
           userPrice: typeof payload.userPrice === 'number' ? payload.userPrice : 0,
           storagePrice: typeof payload.storagePrice === 'number' ? payload.storagePrice : 0,
+          bannerDaysBeforeExpiry:
+            typeof payload.bannerDaysBeforeExpiry === 'number' ? payload.bannerDaysBeforeExpiry : null,
           createdAt: now,
           updatedAt: now
         };
@@ -429,4 +526,3 @@ app.listen(PORT, '0.0.0.0', async () => {
   await mongo.connect();
   await eventBus.connect();
 });
-

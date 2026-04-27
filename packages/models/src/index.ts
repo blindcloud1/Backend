@@ -211,9 +211,12 @@ export type SubscriptionPlanDoc = DbDocBase &
     description: string;
     price: number;
     features: string[];
-    maxEmployees: number;
-    maxJobs: number;
-    stripePriceId?: string;
+    maxEmployees: number | null;
+    maxSubBusinessUsers?: number | null;
+    maxProducts?: number | null;
+    maxEmailsPerMonth?: number | null;
+    maxJobs: number | null;
+    stripePriceId?: string | null;
     active: boolean;
   };
 
@@ -298,6 +301,7 @@ export type CustomPlanConfigDoc = DbDocBase &
     emailPrice: number;
     userPrice: number;
     storagePrice: number;
+    bannerDaysBeforeExpiry?: number | null;
   };
 
 export type FileDoc = DbDocBase & {

@@ -149,6 +149,7 @@ app.post(
     const table: PricingTableDoc = {
       _id: crypto.randomUUID(),
       businessId,
+      productId: payload.productId,
       name: String(payload.name || ''),
       unitSystem: (payload.unitSystem || 'inches') as any,
       widthValues: Array.isArray(payload.widthValues) ? payload.widthValues : [],
@@ -256,4 +257,3 @@ app.listen(PORT, '0.0.0.0', async () => {
   await mongo.connect();
   await eventBus.connect();
 });
-

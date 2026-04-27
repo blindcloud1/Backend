@@ -87,6 +87,14 @@ const isValidStatus = (value) => {
 const isValidPaymentStatus = (value) => {
     return ['succeeded', 'failed', 'pending', 'refunded'].includes(String(value));
 };
+const toNullableNumberOrDefault = (value, defaultValue) => {
+    if (value === null)
+        return null;
+    if (value === undefined)
+        return defaultValue;
+    const n = typeof value === 'number' ? value : Number(value);
+    return Number.isFinite(n) ? n : defaultValue;
+};
 const app = (0, express_1.default)();
 app.use(express_1.default.json({ limit: '2mb' }));
 app.use((0, helmet_1.default)());
@@ -118,9 +126,12 @@ app.post('/subscription-plans', authenticate, requireAdmin, [(0, express_validat
         description: String(payload.description || ''),
         price: typeof payload.price === 'number' ? payload.price : Number(payload.price),
         features: Array.isArray(payload.features) ? payload.features : [],
-        maxEmployees: typeof payload.maxEmployees === 'number' ? payload.maxEmployees : 0,
-        maxJobs: typeof payload.maxJobs === 'number' ? payload.maxJobs : 0,
-        stripePriceId: payload.stripePriceId,
+        maxEmployees: toNullableNumberOrDefault(payload.maxEmployees, 0),
+        maxSubBusinessUsers: toNullableNumberOrDefault(payload.maxSubBusinessUsers, null),
+        maxProducts: toNullableNumberOrDefault(payload.maxProducts, null),
+        maxEmailsPerMonth: toNullableNumberOrDefault(payload.maxEmailsPerMonth, null),
+        maxJobs: toNullableNumberOrDefault(payload.maxJobs, 0),
+        stripePriceId: payload.stripePriceId ?? null,
         active: payload.active ?? true,
         createdAt: now,
         updatedAt: now
@@ -203,6 +214,68 @@ app.get('/subscriptions', authenticate, requireAdmin, async (req, res) => {
         filter.status = req.query.status;
     const subs = await subsCollection().find(filter).sort({ createdAt: -1 }).toArray();
     res.json(subs.map(toSubResponse));
+});
+app.post('/subscriptions/grant', authenticate, requireAdmin, [(0, express_validator_1.body)('userId').isLength({ min: 1 }), (0, express_validator_1.body)('planId').isLength({ min: 1 }), (0, express_validator_1.body)('durationMonths').optional().isInt({ min: 1 })], async (req, res) => {
+    const errors = (0, express_validator_1.validationResult)(req);
+    if (!errors.isEmpty())
+        return res.status(400).json({ errors: errors.array() });
+    const { userId, planId, durationMonths } = req.body;
+    const targetUser = await usersCollection().findOne({ _id: String(userId) });
+    if (!targetUser)
+        return res.status(404).json({ error: 'User not found' });
+    const plan = await plansCollection().findOne({ _id: String(planId) });
+    if (!plan)
+        return res.status(404).json({ error: 'Plan not found' });
+    const monthsRaw = typeof durationMonths === 'number' ? durationMonths : Number(durationMonths);
+    const months = Number.isFinite(monthsRaw) && monthsRaw > 0 ? Math.floor(monthsRaw) : 1;
+    const now = new Date();
+    const end = new Date(now);
+    end.setMonth(end.getMonth() + months);
+    const existingSub = await subsCollection().findOne({ userId: String(userId) }, { sort: { currentPeriodEnd: -1 } });
+    const subscription = existingSub
+        ? {
+            ...existingSub,
+            planId: String(planId),
+            status: 'active',
+            currentPeriodStart: now,
+            currentPeriodEnd: end,
+            cancelAtPeriodEnd: false,
+            grantedByAdmin: true,
+            grantedBy: req.user.id,
+            updatedAt: now
+        }
+        : {
+            _id: crypto_1.default.randomUUID(),
+            userId: String(userId),
+            planId: String(planId),
+            status: 'active',
+            stripeCustomerId: undefined,
+            stripeSubscriptionId: undefined,
+            currentPeriodStart: now,
+            currentPeriodEnd: end,
+            cancelAtPeriodEnd: false,
+            grantedByAdmin: true,
+            grantedBy: req.user.id,
+            createdAt: now,
+            updatedAt: now
+        };
+    if (existingSub) {
+        await subsCollection().updateOne({ _id: existingSub._id }, { $set: subscription });
+    }
+    else {
+        await subsCollection().insertOne(subscription);
+    }
+    const event = {
+        id: crypto_1.default.randomUUID(),
+        type: 'subscriptions.granted',
+        version: 1,
+        source: 'billing-service',
+        occurredAt: new Date().toISOString(),
+        correlationId: req.header('x-correlation-id') || undefined,
+        payload: { subscriptionId: subscription._id, userId: subscription.userId, planId: subscription.planId, grantedBy: req.user.id }
+    };
+    await eventBus.publish('subscriptions.granted', event);
+    res.status(201).json(toSubResponse(subscription));
 });
 app.post('/subscriptions/me', authenticate, [(0, express_validator_1.body)('planId').isLength({ min: 1 })], async (req, res) => {
     const errors = (0, express_validator_1.validationResult)(req);
@@ -328,7 +401,14 @@ app.get('/custom-plan-config', authenticate, requireAdmin, async (_req, res) => 
         return res.json(null);
     res.json(toConfigResponse(config));
 });
-app.put('/custom-plan-config', authenticate, requireAdmin, [(0, express_validator_1.body)('jobPrice').optional().isNumeric(), (0, express_validator_1.body)('productPrice').optional().isNumeric()], async (req, res) => {
+app.put('/custom-plan-config', authenticate, requireAdmin, [
+    (0, express_validator_1.body)('jobPrice').optional().isNumeric(),
+    (0, express_validator_1.body)('productPrice').optional().isNumeric(),
+    (0, express_validator_1.body)('emailPrice').optional().isNumeric(),
+    (0, express_validator_1.body)('userPrice').optional().isNumeric(),
+    (0, express_validator_1.body)('storagePrice').optional().isNumeric(),
+    (0, express_validator_1.body)('bannerDaysBeforeExpiry').optional().isInt({ min: 0 })
+], async (req, res) => {
     const errors = (0, express_validator_1.validationResult)(req);
     if (!errors.isEmpty())
         return res.status(400).json({ errors: errors.array() });
@@ -344,6 +424,7 @@ app.put('/custom-plan-config', authenticate, requireAdmin, [(0, express_validato
             emailPrice: typeof payload.emailPrice === 'number' ? payload.emailPrice : 0,
             userPrice: typeof payload.userPrice === 'number' ? payload.userPrice : 0,
             storagePrice: typeof payload.storagePrice === 'number' ? payload.storagePrice : 0,
+            bannerDaysBeforeExpiry: typeof payload.bannerDaysBeforeExpiry === 'number' ? payload.bannerDaysBeforeExpiry : null,
             createdAt: now,
             updatedAt: now
         };
