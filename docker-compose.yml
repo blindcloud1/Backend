@@ -54,6 +54,10 @@ services:
       MONGO_URL: ${MONGO_URL:-mongodb://${MONGO_ROOT_USER:-admin}:${MONGO_ROOT_PASSWORD:-change-me}@mongo:27017/admin}
       RABBITMQ_URL: ${RABBITMQ_URL:-amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-change-me}@rabbitmq:5672}
       EVENT_EXCHANGE: ${EVENT_EXCHANGE:-blindscloud.events}
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:5173}
+      SENDGRID_API_KEY: ${SENDGRID_API_KEY:-}
+      SENDGRID_FROM_EMAIL: ${SENDGRID_FROM_EMAIL:-noreply@blindscloud.co.uk}
+      SENDGRID_FROM_NAME: ${SENDGRID_FROM_NAME:-BlindsCloud}
     depends_on:
       - mongo
       - rabbitmq

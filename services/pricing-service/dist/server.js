@@ -139,6 +139,7 @@ app.post('/pricing-tables', authenticate, requireAdminOrBusiness, [(0, express_v
     const table = {
         _id: crypto_1.default.randomUUID(),
         businessId,
+        productId: payload.productId,
         name: String(payload.name || ''),
         unitSystem: (payload.unitSystem || 'inches'),
         widthValues: Array.isArray(payload.widthValues) ? payload.widthValues : [],

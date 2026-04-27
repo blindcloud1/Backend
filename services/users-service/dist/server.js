@@ -12,12 +12,17 @@ const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const mongodb_1 = require("mongodb");
 const crypto_1 = __importDefault(require("crypto"));
 const event_bus_1 = require("@blindscloud/event-bus");
+const https_1 = __importDefault(require("https"));
 dotenv_1.default.config();
 const PORT = parseInt(process.env.PORT || '4002', 10);
 const JWT_SECRET = process.env.JWT_SECRET || '';
 const MONGO_URL = process.env.MONGO_URL || '';
 const RABBITMQ_URL = process.env.RABBITMQ_URL || '';
 const EVENT_EXCHANGE = process.env.EVENT_EXCHANGE || 'blindscloud.events';
+const SENDGRID_API_KEY = process.env.SENDGRID_API_KEY || '';
+const SENDGRID_FROM_EMAIL = process.env.SENDGRID_FROM_EMAIL || 'noreply@blindscloud.co.uk';
+const SENDGRID_FROM_NAME = process.env.SENDGRID_FROM_NAME || 'BlindsCloud';
+const FRONTEND_URL = process.env.FRONTEND_URL || '';
 if (!JWT_SECRET)
     throw new Error('JWT_SECRET is required');
 if (!MONGO_URL)
@@ -31,6 +36,68 @@ const eventBus = new event_bus_1.EventBus({
     serviceName: 'users-service'
 });
 const usersCollection = () => mongo.db('blindscloud').collection('users');
+const sendSendGridMail = async (payload) => {
+    if (!SENDGRID_API_KEY)
+        throw new Error('SENDGRID_API_KEY is not configured');
+    const body = JSON.stringify({
+        personalizations: [{ to: [{ email: payload.to }] }],
+        from: { email: SENDGRID_FROM_EMAIL, name: SENDGRID_FROM_NAME },
+        subject: payload.subject,
+        content: [
+            { type: 'text/plain', value: payload.text },
+            { type: 'text/html', value: payload.html }
+        ]
+    });
+    const contentLength = Buffer.byteLength(body);
+    await new Promise((resolve, reject) => {
+        const req = https_1.default.request({
+            hostname: 'api.sendgrid.com',
+            path: '/v3/mail/send',
+            method: 'POST',
+            headers: {
+                Authorization: `Bearer ${SENDGRID_API_KEY}`,
+                'Content-Type': 'application/json',
+                'Content-Length': contentLength
+            }
+        }, (res) => {
+            let responseBody = '';
+            res.on('data', (chunk) => {
+                responseBody += String(chunk);
+            });
+            res.on('end', () => {
+                const code = res.statusCode || 0;
+                if (code >= 200 && code < 300)
+                    return resolve();
+                return reject(new Error(`SendGrid error ${code}: ${responseBody}`));
+            });
+        });
+        req.on('error', reject);
+        req.write(body);
+        req.end();
+    });
+};
+const sendVerificationEmail = async (opts) => {
+    if (!FRONTEND_URL)
+        throw new Error('FRONTEND_URL is not configured');
+    const verifyUrl = `${FRONTEND_URL.replace(/\/$/, '')}/verify-email?token=${encodeURIComponent(opts.token)}&email=${encodeURIComponent(opts.to)}`;
+    const subject = 'Verify your BlindsCloud account';
+    const text = `Welcome to BlindsCloud!\n\nPlease verify your email address by opening this link:\n${verifyUrl}\n\nIf you did not request this account, you can ignore this email.\n`;
+    const html = `
+    <div style="font-family: Arial, sans-serif; max-width: 640px; margin: 0 auto; padding: 16px;">
+      <h2 style="margin: 0 0 12px;">Verify your email</h2>
+      <p style="margin: 0 0 12px;">Welcome to BlindsCloud. Please verify your email address to activate your account.</p>
+      <p style="margin: 16px 0;">
+        <a href="${verifyUrl}" style="display:inline-block;background:#2563eb;color:#fff;text-decoration:none;padding:10px 16px;border-radius:8px;">
+          Verify Email
+        </a>
+      </p>
+      <p style="margin: 12px 0; color: #4b5563; font-size: 14px;">Or copy and paste this link into your browser:</p>
+      <p style="word-break: break-all; color:#111827; font-size: 14px; margin: 0 0 12px;">${verifyUrl}</p>
+      <p style="color:#6b7280; font-size: 12px; margin: 24px 0 0;">If you did not request this account, you can ignore this email.</p>
+    </div>
+  `;
+    await sendSendGridMail({ to: opts.to, subject, html, text });
+};
 const authenticate = (req, res, next) => {
     const header = req.header('authorization') || req.header('Authorization');
     if (!header)
@@ -122,6 +189,8 @@ app.post('/users', authenticate, requireAdminOrBusiness, [
     if ((createdRole === 'employee' || createdRole === 'merchant') && role === 'admin' && (!payload.parentId || typeof payload.parentId !== 'string')) {
         return res.status(400).json({ error: 'parentId is required for employee/merchant' });
     }
+    const requiresEmailVerification = createdRole !== 'admin';
+    const verificationToken = requiresEmailVerification ? crypto_1.default.randomUUID() : undefined;
     const newUser = {
         _id: crypto_1.default.randomUUID(),
         email: String(payload.email || '').toLowerCase(),
@@ -132,7 +201,8 @@ app.post('/users', authenticate, requireAdminOrBusiness, [
         parentId: role === 'admin' ? (payload.parentId || req.user.id) : currentUser._id,
         permissions: Array.isArray(payload.permissions) ? payload.permissions : [],
         isActive: payload.isActive ?? true,
-        emailVerified: payload.emailVerified ?? false,
+        emailVerified: requiresEmailVerification ? false : true,
+        verificationToken,
         address: payload.address,
         createdBy: req.user.id,
         createdAt: now,
@@ -142,6 +212,16 @@ app.post('/users', authenticate, requireAdminOrBusiness, [
     if (existing)
         return res.status(409).json({ error: 'Email already exists' });
     await usersCollection().insertOne(newUser);
+    let verificationEmailSent = false;
+    if (requiresEmailVerification && verificationToken) {
+        try {
+            await sendVerificationEmail({ to: newUser.email, token: verificationToken });
+            verificationEmailSent = true;
+        }
+        catch (err) {
+            console.error('Error sending verification email:', err);
+        }
+    }
     const event = {
         id: crypto_1.default.randomUUID(),
         type: 'users.created',
@@ -162,6 +242,7 @@ app.post('/users', authenticate, requireAdminOrBusiness, [
         permissions: newUser.permissions,
         isActive: newUser.isActive,
         emailVerified: newUser.emailVerified,
+        verificationEmailSent,
         createdAt: newUser.createdAt.toISOString()
     });
 });
