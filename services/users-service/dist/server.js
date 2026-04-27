@@ -136,6 +136,31 @@ app.get('/health', async (_req, res) => {
         res.status(500).json({ status: 'ERROR', error: err?.message || String(err) });
     }
 });
+app.post('/email/send', authenticate, requireAdminOrBusiness, [
+    (0, express_validator_1.body)('to').isEmail().normalizeEmail(),
+    (0, express_validator_1.body)('subject').isLength({ min: 1 }),
+    (0, express_validator_1.body)('html').optional().isString(),
+    (0, express_validator_1.body)('text').optional().isString(),
+    (0, express_validator_1.body)('htmlBody').optional().isString(),
+    (0, express_validator_1.body)('textBody').optional().isString()
+], async (req, res) => {
+    const errors = (0, express_validator_1.validationResult)(req);
+    if (!errors.isEmpty())
+        return res.status(400).json({ errors: errors.array() });
+    const payload = req.body;
+    const to = String(payload.to || '').toLowerCase();
+    const subject = String(payload.subject || '');
+    const rawHtml = typeof payload.html === 'string' ? payload.html : (typeof payload.htmlBody === 'string' ? payload.htmlBody : '');
+    const rawText = typeof payload.text === 'string' ? payload.text : (typeof payload.textBody === 'string' ? payload.textBody : '');
+    if (!rawHtml && !rawText) {
+        return res.status(400).json({ error: 'Either html or text is required' });
+    }
+    const escapeHtml = (value) => value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;');
+    const html = rawHtml || `<pre style="white-space: pre-wrap; font-family: Arial, sans-serif;">${escapeHtml(rawText)}</pre>`;
+    const text = rawText || rawHtml.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+    await sendSendGridMail({ to, subject, html, text });
+    res.json({ status: 'OK' });
+});
 app.get('/users', authenticate, async (req, res) => {
     const role = req.user.role.toLowerCase();
     const currentUser = await usersCollection().findOne({ _id: req.user.id });

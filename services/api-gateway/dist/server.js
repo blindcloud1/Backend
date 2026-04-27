@@ -193,6 +193,20 @@ app.use((0, http_proxy_middleware_1.createProxyMiddleware)({
     }
 }));
 app.use((0, http_proxy_middleware_1.createProxyMiddleware)({
+    target: USERS_SERVICE_URL,
+    changeOrigin: true,
+    pathFilter: '/api/email',
+    pathRewrite: { '^/api/email': '/email' },
+    on: {
+        proxyReq: (proxyReq, req, _res) => {
+            const correlationId = req.headers['x-correlation-id'];
+            if (correlationId && typeof correlationId === 'string') {
+                proxyReq.setHeader('x-correlation-id', correlationId);
+            }
+        }
+    }
+}));
+app.use((0, http_proxy_middleware_1.createProxyMiddleware)({
     target: BUSINESSES_SERVICE_URL,
     changeOrigin: true,
     pathFilter: '/api/businesses',
