@@ -229,6 +229,20 @@ app.use(createProxyMiddleware({
 }));
 
 app.use(createProxyMiddleware({
+  target: USERS_SERVICE_URL,
+  changeOrigin: true,
+  pathFilter: '/email',
+  on: {
+    proxyReq: (proxyReq: ClientRequest, req: IncomingMessage, _res: ServerResponse) => {
+      const correlationId = req.headers['x-correlation-id'];
+      if (correlationId && typeof correlationId === 'string') {
+        proxyReq.setHeader('x-correlation-id', correlationId);
+      }
+    }
+  }
+}));
+
+app.use(createProxyMiddleware({
   target: BUSINESSES_SERVICE_URL,
   changeOrigin: true,
   pathFilter: '/api/businesses',
