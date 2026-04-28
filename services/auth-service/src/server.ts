@@ -128,7 +128,7 @@ app.post(
     }
 
     if (!user) return res.status(400).json({ error: 'Invalid or expired verification token' });
-    if (user.verificationToken && user.verificationToken !== token) {
+    if (!user.verificationToken || user.verificationToken !== token) {
       return res.status(400).json({ error: 'Invalid or expired verification token' });
     }
 
@@ -167,6 +167,41 @@ app.post(
         createdAt: user.createdAt?.toISOString?.() || new Date().toISOString()
       }
     });
+  }
+);
+
+app.post(
+  '/auth/reset-password',
+  [body('token').isLength({ min: 1 }), body('password').isLength({ min: 8 })],
+  async (req: Request, res: Response) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+
+    const { token, password } = req.body as { token: string; password: string };
+    const users = getUsersCollection();
+
+    const user = await users.findOne({ verificationToken: token } as any);
+    if (!user) return res.status(400).json({ error: 'Invalid or expired token' });
+    if (!user.emailVerified) return res.status(403).json({ error: 'Email not verified' });
+
+    const passwordHash = await bcrypt.hash(password, 10);
+    await users.updateOne(
+      { _id: user._id },
+      { $set: { passwordHash, verificationToken: undefined, updatedAt: new Date() } as any }
+    );
+
+    const event: CloudEvent<{ userId: string; email: string }> = {
+      id: crypto.randomUUID(),
+      type: 'auth.password.set',
+      version: 1,
+      source: 'auth-service',
+      occurredAt: new Date().toISOString(),
+      correlationId: req.header('x-correlation-id') || undefined,
+      payload: { userId: String(user._id), email: user.email }
+    };
+    await eventBus.publish('auth.password.set', event);
+
+    res.json({ status: 'OK' });
   }
 );
 

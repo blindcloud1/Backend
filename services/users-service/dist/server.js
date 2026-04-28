@@ -211,7 +211,7 @@ app.post('/users', authenticate, requireAdminOrBusiness, [
     (0, express_validator_1.body)('email').isEmail().normalizeEmail(),
     (0, express_validator_1.body)('name').isLength({ min: 1 }),
     (0, express_validator_1.body)('role').isString(),
-    (0, express_validator_1.body)('password').isLength({ min: 8 })
+    (0, express_validator_1.body)('password').optional().isLength({ min: 8 })
 ], async (req, res) => {
     const errors = (0, express_validator_1.validationResult)(req);
     if (!errors.isEmpty())
@@ -225,10 +225,8 @@ app.post('/users', authenticate, requireAdminOrBusiness, [
     const allowedRoles = new Set(['admin', 'business', 'employee', 'merchant']);
     if (!allowedRoles.has(createdRole))
         return res.status(400).json({ error: 'Invalid role' });
-    const password = String(payload.password || '');
-    if (!password)
-        return res.status(400).json({ error: 'Password is required' });
-    const passwordHash = await bcryptjs_1.default.hash(password, 10);
+    const password = typeof payload.password === 'string' ? payload.password : '';
+    const passwordHash = password.length > 0 ? await bcryptjs_1.default.hash(password, 10) : undefined;
     const now = new Date();
     const businessId = role === 'admin' ? payload.businessId : currentUser.businessId;
     if (createdRole !== 'admin' && (!businessId || typeof businessId !== 'string')) {
@@ -238,12 +236,17 @@ app.post('/users', authenticate, requireAdminOrBusiness, [
         return res.status(400).json({ error: 'parentId is required for employee/merchant' });
     }
     const requiresEmailVerification = createdRole !== 'admin';
-    const verificationToken = requiresEmailVerification ? crypto_1.default.randomUUID() : undefined;
+    const providedVerificationToken = typeof payload.verificationToken === 'string' ? payload.verificationToken : undefined;
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+    if (providedVerificationToken && !uuidRegex.test(providedVerificationToken)) {
+        return res.status(400).json({ error: 'Invalid verificationToken' });
+    }
+    const verificationToken = requiresEmailVerification ? (providedVerificationToken || crypto_1.default.randomUUID()) : undefined;
     const newUser = {
         _id: crypto_1.default.randomUUID(),
         email: String(payload.email || '').toLowerCase(),
         name: String(payload.name || ''),
-        passwordHash,
+        passwordHash: passwordHash,
         role: createdRole,
         businessId: createdRole === 'admin' ? undefined : businessId,
         parentId: role === 'admin' ? (payload.parentId || req.user.id) : currentUser._id,
@@ -261,7 +264,7 @@ app.post('/users', authenticate, requireAdminOrBusiness, [
         return res.status(409).json({ error: 'Email already exists' });
     await usersCollection().insertOne(newUser);
     let verificationEmailSent = false;
-    if (requiresEmailVerification && verificationToken) {
+    if (requiresEmailVerification && verificationToken && !providedVerificationToken) {
         try {
             await sendVerificationEmail({ to: newUser.email, token: verificationToken });
             verificationEmailSent = true;

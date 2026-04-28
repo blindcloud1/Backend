@@ -113,7 +113,7 @@ app.post('/auth/verify-email', [(0, express_validator_1.body)('token').isLength(
     }
     if (!user)
         return res.status(400).json({ error: 'Invalid or expired verification token' });
-    if (user.verificationToken && user.verificationToken !== token) {
+    if (!user.verificationToken || user.verificationToken !== token) {
         return res.status(400).json({ error: 'Invalid or expired verification token' });
     }
     const updates = {
@@ -148,6 +148,31 @@ app.post('/auth/verify-email', [(0, express_validator_1.body)('token').isLength(
             createdAt: user.createdAt?.toISOString?.() || new Date().toISOString()
         }
     });
+});
+app.post('/auth/reset-password', [(0, express_validator_1.body)('token').isLength({ min: 1 }), (0, express_validator_1.body)('password').isLength({ min: 8 })], async (req, res) => {
+    const errors = (0, express_validator_1.validationResult)(req);
+    if (!errors.isEmpty())
+        return res.status(400).json({ errors: errors.array() });
+    const { token, password } = req.body;
+    const users = getUsersCollection();
+    const user = await users.findOne({ verificationToken: token });
+    if (!user)
+        return res.status(400).json({ error: 'Invalid or expired token' });
+    if (!user.emailVerified)
+        return res.status(403).json({ error: 'Email not verified' });
+    const passwordHash = await bcryptjs_1.default.hash(password, 10);
+    await users.updateOne({ _id: user._id }, { $set: { passwordHash, verificationToken: undefined, updatedAt: new Date() } });
+    const event = {
+        id: crypto_1.default.randomUUID(),
+        type: 'auth.password.set',
+        version: 1,
+        source: 'auth-service',
+        occurredAt: new Date().toISOString(),
+        correlationId: req.header('x-correlation-id') || undefined,
+        payload: { userId: String(user._id), email: user.email }
+    };
+    await eventBus.publish('auth.password.set', event);
+    res.json({ status: 'OK' });
 });
 app.listen(PORT, '0.0.0.0', async () => {
     await mongo.connect();

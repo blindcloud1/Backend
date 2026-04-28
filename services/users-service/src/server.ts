@@ -256,7 +256,7 @@ app.post(
     body('email').isEmail().normalizeEmail(),
     body('name').isLength({ min: 1 }),
     body('role').isString(),
-    body('password').isLength({ min: 8 })
+    body('password').optional().isLength({ min: 8 })
   ],
   async (req: AuthRequest, res: Response) => {
     const errors = validationResult(req);
@@ -266,14 +266,13 @@ app.post(
     if (!currentUser) return res.status(401).json({ error: 'User not found' });
 
     const role = req.user!.role.toLowerCase();
-    const payload = req.body as Partial<UserDoc> & { password?: string };
+    const payload = req.body as Partial<UserDoc> & { password?: string; verificationToken?: string };
     const createdRole = String(payload.role || 'employee').toLowerCase();
     const allowedRoles = new Set(['admin', 'business', 'employee', 'merchant']);
     if (!allowedRoles.has(createdRole)) return res.status(400).json({ error: 'Invalid role' });
 
-    const password = String(payload.password || '');
-    if (!password) return res.status(400).json({ error: 'Password is required' });
-    const passwordHash = await bcrypt.hash(password, 10);
+    const password = typeof payload.password === 'string' ? payload.password : '';
+    const passwordHash = password.length > 0 ? await bcrypt.hash(password, 10) : undefined;
 
     const now = new Date();
     const businessId = role === 'admin' ? payload.businessId : currentUser.businessId;
@@ -285,13 +284,18 @@ app.post(
     }
 
     const requiresEmailVerification = createdRole !== 'admin';
-    const verificationToken = requiresEmailVerification ? crypto.randomUUID() : undefined;
+    const providedVerificationToken = typeof payload.verificationToken === 'string' ? payload.verificationToken : undefined;
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+    if (providedVerificationToken && !uuidRegex.test(providedVerificationToken)) {
+      return res.status(400).json({ error: 'Invalid verificationToken' });
+    }
+    const verificationToken = requiresEmailVerification ? (providedVerificationToken || crypto.randomUUID()) : undefined;
 
     const newUser: UserDoc = {
       _id: crypto.randomUUID(),
       email: String(payload.email || '').toLowerCase(),
       name: String(payload.name || ''),
-      passwordHash,
+      passwordHash: passwordHash as any,
       role: createdRole as any,
       businessId: createdRole === 'admin' ? undefined : (businessId as any),
       parentId: role === 'admin' ? (payload.parentId || req.user!.id) : currentUser._id,
@@ -311,7 +315,7 @@ app.post(
     await usersCollection().insertOne(newUser);
 
     let verificationEmailSent = false;
-    if (requiresEmailVerification && verificationToken) {
+    if (requiresEmailVerification && verificationToken && !providedVerificationToken) {
       try {
         await sendVerificationEmail({ to: newUser.email, token: verificationToken });
         verificationEmailSent = true;
