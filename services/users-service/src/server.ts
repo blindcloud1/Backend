@@ -43,8 +43,12 @@ const eventBus = new EventBus({
 
 const usersCollection = () => mongo.db('blindscloud').collection<UserDoc>('users');
 
+class EmailConfigError extends Error {
+  override name = 'EmailConfigError';
+}
+
 const sendSendGridMail = async (payload: { to: string; subject: string; html: string; text: string }) => {
-  if (!SENDGRID_API_KEY) throw new Error('SENDGRID_API_KEY is not configured');
+  if (!SENDGRID_API_KEY) throw new EmailConfigError('SENDGRID_API_KEY is not configured');
 
   const timeoutMs = 10000;
   const body = JSON.stringify({
@@ -197,9 +201,23 @@ app.post(
 
     try {
       await sendSendGridMail({ to, subject, html, text });
-      res.json({ status: 'OK' });
-    } catch {
-      res.status(502).json({ error: 'Email provider error' });
+      return res.json({ status: 'OK' });
+    } catch (err: any) {
+      if (err instanceof EmailConfigError) {
+        return res.status(500).json({ error: 'Email is not configured' });
+      }
+
+      const message = err instanceof Error ? err.message : String(err);
+      if (message === 'SendGrid request timeout') {
+        return res.status(504).json({ error: 'Email provider timeout' });
+      }
+
+      const statusMatch = message.match(/SendGrid error\s+(\d+)/i);
+      if (statusMatch) {
+        return res.status(502).json({ error: 'Email provider error', providerStatus: parseInt(statusMatch[1], 10) });
+      }
+
+      return res.status(502).json({ error: 'Email provider error' });
     }
   }
 );
