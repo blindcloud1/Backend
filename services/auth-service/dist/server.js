@@ -98,6 +98,9 @@ const handleLogin = async (req, res) => {
 };
 app.post('/auth/login', loginValidators, handleLogin);
 app.post('/login', loginValidators, handleLogin);
+app.post('/auth/logout', (_req, res) => {
+    res.json({ status: 'OK' });
+});
 app.post('/auth/verify-email', [(0, express_validator_1.body)('token').isLength({ min: 1 }), (0, express_validator_1.body)('email').optional().isEmail().normalizeEmail(), (0, express_validator_1.body)('clearToken').optional().isBoolean()], async (req, res) => {
     const errors = (0, express_validator_1.validationResult)(req);
     if (!errors.isEmpty())

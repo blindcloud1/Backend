@@ -482,6 +482,18 @@ app.use(createProxyMiddleware({
   }
 }));
 
+app.get('/api/push/vapid-public-key', (_req: Request, res: Response) => {
+  res.json({ publicKey: null });
+});
+
+app.post('/api/push/subscribe', (_req: Request, res: Response) => {
+  res.json({ status: 'SKIPPED' });
+});
+
+app.post('/api/push/send', (_req: Request, res: Response) => {
+  res.json({ status: 'SKIPPED' });
+});
+
 app.use('/api', (_req: Request, res: Response) => {
   res.status(501).json({ error: 'Not implemented in gateway yet' });
 });

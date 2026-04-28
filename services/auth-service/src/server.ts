@@ -109,6 +109,10 @@ const handleLogin = async (req: Request, res: Response) => {
 app.post('/auth/login', loginValidators, handleLogin);
 app.post('/login', loginValidators, handleLogin);
 
+app.post('/auth/logout', (_req: Request, res: Response) => {
+  res.json({ status: 'OK' });
+});
+
 app.post(
   '/auth/verify-email',
   [body('token').isLength({ min: 1 }), body('email').optional().isEmail().normalizeEmail(), body('clearToken').optional().isBoolean()],

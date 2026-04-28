@@ -443,6 +443,15 @@ app.use((0, http_proxy_middleware_1.createProxyMiddleware)({
         }
     }
 }));
+app.get('/api/push/vapid-public-key', (_req, res) => {
+    res.json({ publicKey: null });
+});
+app.post('/api/push/subscribe', (_req, res) => {
+    res.json({ status: 'SKIPPED' });
+});
+app.post('/api/push/send', (_req, res) => {
+    res.json({ status: 'SKIPPED' });
+});
 app.use('/api', (_req, res) => {
     res.status(501).json({ error: 'Not implemented in gateway yet' });
 });
