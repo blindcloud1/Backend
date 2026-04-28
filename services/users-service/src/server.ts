@@ -46,6 +46,7 @@ const usersCollection = () => mongo.db('blindscloud').collection<UserDoc>('users
 const sendSendGridMail = async (payload: { to: string; subject: string; html: string; text: string }) => {
   if (!SENDGRID_API_KEY) throw new Error('SENDGRID_API_KEY is not configured');
 
+  const timeoutMs = 10000;
   const body = JSON.stringify({
     personalizations: [{ to: [{ email: payload.to }] }],
     from: { email: SENDGRID_FROM_EMAIL, name: SENDGRID_FROM_NAME },
@@ -84,6 +85,9 @@ const sendSendGridMail = async (payload: { to: string; subject: string; html: st
     );
 
     req.on('error', reject);
+    req.setTimeout(timeoutMs, () => {
+      req.destroy(new Error('SendGrid request timeout'));
+    });
     req.write(body);
     req.end();
   });
@@ -191,8 +195,12 @@ app.post(
     const html = rawHtml || `<pre style="white-space: pre-wrap; font-family: Arial, sans-serif;">${escapeHtml(rawText)}</pre>`;
     const text = rawText || rawHtml.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
 
-    await sendSendGridMail({ to, subject, html, text });
-    res.json({ status: 'OK' });
+    try {
+      await sendSendGridMail({ to, subject, html, text });
+      res.json({ status: 'OK' });
+    } catch {
+      res.status(502).json({ error: 'Email provider error' });
+    }
   }
 );
 

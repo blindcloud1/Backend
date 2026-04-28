@@ -56,6 +56,21 @@ const requireAdminOrBusiness = (req: AuthRequest, res: Response, next: NextFunct
   return res.status(403).json({ error: 'Insufficient permissions' });
 };
 
+const requireAdmin = (req: AuthRequest, res: Response, next: NextFunction) => {
+  const role = req.user?.role?.toLowerCase();
+  if (role === 'admin') return next();
+  return res.status(403).json({ error: 'Insufficient permissions' });
+};
+
+const normalizeBusinessId = (value: unknown): string | null => {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  if (trimmed.length > 128) return null;
+  if (!/^[a-zA-Z0-9_-]+$/.test(trimmed)) return null;
+  return trimmed;
+};
+
 const getCurrentUser = async (req: AuthRequest): Promise<UserDoc | null> => {
   return usersCollection().findOne({ _id: req.user!.id } as any);
 };
@@ -110,21 +125,22 @@ app.get('/businesses/:id', authenticate, async (req: AuthRequest, res: Response)
 app.post(
   '/businesses',
   authenticate,
-  requireAdminOrBusiness,
-  [body('name').isLength({ min: 1 }), body('address').isLength({ min: 1 })],
+  requireAdmin,
+  [body('name').isLength({ min: 1 }), body('address').optional().isString()],
   async (req: AuthRequest, res: Response) => {
     const errors = validationResult(req);
     if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
 
-    const role = req.user!.role.toLowerCase();
-    if (role !== 'admin') return res.status(403).json({ error: 'Insufficient permissions' });
-
     const payload = req.body as Partial<BusinessDoc>;
     const now = new Date();
+    const requestedId =
+      normalizeBusinessId((payload as any)._id) ||
+      normalizeBusinessId((payload as any).id) ||
+      normalizeBusinessId((payload as any).businessId);
     const business: BusinessDoc = {
-      _id: crypto.randomUUID(),
+      _id: requestedId || crypto.randomUUID(),
       name: String(payload.name || ''),
-      address: String(payload.address || ''),
+      address: typeof payload.address === 'string' ? payload.address : '',
       phone: payload.phone,
       email: payload.email,
       adminId: payload.adminId,

@@ -54,6 +54,24 @@ const requireAdminOrBusiness = (req, res, next) => {
         return next();
     return res.status(403).json({ error: 'Insufficient permissions' });
 };
+const requireAdmin = (req, res, next) => {
+    const role = req.user?.role?.toLowerCase();
+    if (role === 'admin')
+        return next();
+    return res.status(403).json({ error: 'Insufficient permissions' });
+};
+const normalizeBusinessId = (value) => {
+    if (typeof value !== 'string')
+        return null;
+    const trimmed = value.trim();
+    if (!trimmed)
+        return null;
+    if (trimmed.length > 128)
+        return null;
+    if (!/^[a-zA-Z0-9_-]+$/.test(trimmed))
+        return null;
+    return trimmed;
+};
 const getCurrentUser = async (req) => {
     return usersCollection().findOne({ _id: req.user.id });
 };
@@ -103,19 +121,19 @@ app.get('/businesses/:id', authenticate, async (req, res) => {
         return res.status(404).json({ error: 'Business not found' });
     return res.json({ ...business, createdAt: business.createdAt.toISOString(), updatedAt: business.updatedAt?.toISOString() });
 });
-app.post('/businesses', authenticate, requireAdminOrBusiness, [(0, express_validator_1.body)('name').isLength({ min: 1 }), (0, express_validator_1.body)('address').isLength({ min: 1 })], async (req, res) => {
+app.post('/businesses', authenticate, requireAdmin, [(0, express_validator_1.body)('name').isLength({ min: 1 }), (0, express_validator_1.body)('address').optional().isString()], async (req, res) => {
     const errors = (0, express_validator_1.validationResult)(req);
     if (!errors.isEmpty())
         return res.status(400).json({ errors: errors.array() });
-    const role = req.user.role.toLowerCase();
-    if (role !== 'admin')
-        return res.status(403).json({ error: 'Insufficient permissions' });
     const payload = req.body;
     const now = new Date();
+    const requestedId = normalizeBusinessId(payload._id) ||
+        normalizeBusinessId(payload.id) ||
+        normalizeBusinessId(payload.businessId);
     const business = {
-        _id: crypto_1.default.randomUUID(),
+        _id: requestedId || crypto_1.default.randomUUID(),
         name: String(payload.name || ''),
-        address: String(payload.address || ''),
+        address: typeof payload.address === 'string' ? payload.address : '',
         phone: payload.phone,
         email: payload.email,
         adminId: payload.adminId,
