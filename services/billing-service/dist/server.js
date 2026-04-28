@@ -395,7 +395,7 @@ app.post('/payments', authenticate, requireAdmin, [(0, express_validator_1.body)
     await eventBus.publish('payments.created', event);
     res.status(201).json(toPaymentResponse(payment));
 });
-app.get('/custom-plan-config', authenticate, requireAdmin, async (_req, res) => {
+app.get('/custom-plan-config', authenticate, async (_req, res) => {
     const config = await customConfigCollection().findOne({});
     if (!config)
         return res.json(null);

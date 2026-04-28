@@ -464,7 +464,7 @@ app.post(
   }
 );
 
-app.get('/custom-plan-config', authenticate, requireAdmin, async (_req: AuthRequest, res: Response) => {
+app.get('/custom-plan-config', authenticate, async (_req: AuthRequest, res: Response) => {
   const config = await customConfigCollection().findOne({} as any);
   if (!config) return res.json(null);
   res.json(toConfigResponse(config));
