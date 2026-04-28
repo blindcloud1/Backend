@@ -87,6 +87,9 @@ jobs:
           context: .
           file: ${{ matrix.dockerfile }}
           push: true
+          pull: true
+          no-cache: true
+          progress: plain
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
