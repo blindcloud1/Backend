@@ -44,6 +44,29 @@ const EFFECTIVE_ALLOWED_ORIGINS = (
 const app = express();
 app.use(helmet({ crossOriginResourcePolicy: false }));
 
+app.use((req: Request, res: Response, next) => {
+  const origin = req.headers.origin;
+  if (!origin) return next();
+
+  const normalizedOrigin = normalizeOrigin(String(origin));
+  const allowed =
+    EFFECTIVE_ALLOWED_ORIGINS.length === 0 ||
+    EFFECTIVE_ALLOWED_ORIGINS.includes(normalizedOrigin);
+
+  if (!allowed) return next();
+
+  res.setHeader('Access-Control-Allow-Origin', origin);
+  res.setHeader('Vary', 'Origin');
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization,X-Correlation-Id');
+
+  if (req.method.toUpperCase() === 'OPTIONS') {
+    return res.sendStatus(204);
+  }
+  return next();
+});
+
 const corsOptions = {
   origin: (origin, callback) => {
     if (!origin) return callback(null, true);
