@@ -127,8 +127,11 @@ app.post(
     if (email) {
       user = await users.findOne({ email: email.toLowerCase() });
     }
+    const tokenUser = await users.findOne({ verificationToken: token } as any);
     if (!user) {
-      user = await users.findOne({ verificationToken: token } as any);
+      user = tokenUser;
+    } else if (!user.emailVerified && user.verificationToken !== token && tokenUser) {
+      user = tokenUser;
     }
 
     if (!user) return res.status(400).json({ error: 'Invalid or expired verification token' });
