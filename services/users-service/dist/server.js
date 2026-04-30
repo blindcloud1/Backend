@@ -86,7 +86,15 @@ const sendSendGridMail = async (payload) => {
 const sendVerificationEmail = async (opts) => {
     if (!FRONTEND_URL)
         throw new Error('FRONTEND_URL is not configured');
-    const verifyUrl = `${FRONTEND_URL.replace(/\/$/, '')}/verify-email?token=${encodeURIComponent(opts.token)}&email=${encodeURIComponent(opts.to)}`;
+    const base = `${FRONTEND_URL.replace(/\/$/, '')}/verify-email`;
+    const params = new URLSearchParams({
+        token: opts.token,
+        email: opts.to
+    });
+    if (opts.setPassword) {
+        params.set('setPassword', '1');
+    }
+    const verifyUrl = `${base}?${params.toString()}`;
     const subject = 'Verify your BlindsCloud account';
     const text = `Welcome to BlindsCloud!\n\nPlease verify your email address by opening this link:\n${verifyUrl}\n\nIf you did not request this account, you can ignore this email.\n`;
     const html = `
@@ -266,7 +274,8 @@ app.post('/users', authenticate, requireAdminOrBusiness, [
     let verificationEmailSent = false;
     if (requiresEmailVerification && verificationToken && !providedVerificationToken) {
         try {
-            await sendVerificationEmail({ to: newUser.email, token: verificationToken });
+            const setPassword = !passwordHash;
+            await sendVerificationEmail({ to: newUser.email, token: verificationToken, setPassword });
             verificationEmailSent = true;
         }
         catch (err) {

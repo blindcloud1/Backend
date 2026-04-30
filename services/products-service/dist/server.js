@@ -30,6 +30,7 @@ const eventBus = new event_bus_1.EventBus({
     serviceName: 'products-service'
 });
 const productsCollection = () => mongo.db('blindscloud').collection('products');
+const usersCollection = () => mongo.db('blindscloud').collection('users');
 const authenticate = (req, res, next) => {
     const header = req.header('authorization') || req.header('Authorization');
     if (!header)
@@ -52,6 +53,22 @@ const requireAdmin = (req, res, next) => {
         return next();
     return res.status(403).json({ error: 'Insufficient permissions' });
 };
+const requireAdminOrBusiness = (req, res, next) => {
+    const role = req.user?.role?.toLowerCase();
+    if (role === 'admin' || role === 'business')
+        return next();
+    return res.status(403).json({ error: 'Insufficient permissions' });
+};
+const getCurrentUser = async (req) => {
+    return usersCollection().findOne({ _id: req.user.id });
+};
+const canAccessBusiness = (role, currentUser, businessId) => {
+    if (role === 'admin')
+        return true;
+    if (!businessId)
+        return false;
+    return Boolean(currentUser.businessId && currentUser.businessId === businessId);
+};
 const toProductResponse = (p) => ({
     ...p,
     createdAt: p.createdAt.toISOString(),
@@ -69,8 +86,19 @@ app.get('/health', async (_req, res) => {
         res.status(500).json({ status: 'ERROR', error: err?.message || String(err) });
     }
 });
-app.get('/products', authenticate, async (_req, res) => {
-    const products = await productsCollection().find({}).sort({ createdAt: -1 }).toArray();
+app.get('/products', authenticate, async (req, res) => {
+    const role = req.user.role.toLowerCase();
+    const currentUser = await getCurrentUser(req);
+    if (!currentUser)
+        return res.status(401).json({ error: 'User not found' });
+    const filter = {};
+    if (role !== 'admin') {
+        filter.businessId = currentUser.businessId;
+    }
+    else if (req.query.businessId && typeof req.query.businessId === 'string') {
+        filter.businessId = req.query.businessId;
+    }
+    const products = await productsCollection().find(filter).sort({ createdAt: -1 }).toArray();
     res.json(products.map(toProductResponse));
 });
 app.get('/products/:id', authenticate, [(0, express_validator_1.param)('id').isLength({ min: 1 })], async (req, res) => {
@@ -82,23 +110,40 @@ app.get('/products/:id', authenticate, [(0, express_validator_1.param)('id').isL
         return res.status(404).json({ error: 'Product not found' });
     res.json(toProductResponse(product));
 });
-app.post('/products', authenticate, requireAdmin, [(0, express_validator_1.body)('name').isLength({ min: 1 }), (0, express_validator_1.body)('category').isLength({ min: 1 }), (0, express_validator_1.body)('price').isNumeric()], async (req, res) => {
+app.post('/products', authenticate, requireAdminOrBusiness, [
+    (0, express_validator_1.body)('name').isLength({ min: 1 }),
+    (0, express_validator_1.body)('category').isLength({ min: 1 }),
+    (0, express_validator_1.body)('price').isNumeric(),
+    (0, express_validator_1.body)('businessId').optional().isString()
+], async (req, res) => {
     const errors = (0, express_validator_1.validationResult)(req);
     if (!errors.isEmpty())
         return res.status(400).json({ errors: errors.array() });
+    const role = req.user.role.toLowerCase();
+    const currentUser = await getCurrentUser(req);
+    if (!currentUser)
+        return res.status(401).json({ error: 'User not found' });
     const payload = req.body;
+    const businessId = role === 'admin' ? (payload.businessId ? String(payload.businessId) : undefined) : String(currentUser.businessId || '');
+    if (role !== 'admin' && !businessId)
+        return res.status(400).json({ error: 'businessId is required' });
+    if (!canAccessBusiness(role, currentUser, businessId))
+        return res.status(403).json({ error: 'Insufficient permissions' });
     const now = new Date();
     const product = {
         _id: crypto_1.default.randomUUID(),
+        businessId,
         name: String(payload.name || ''),
         category: String(payload.category || ''),
         description: String(payload.description || ''),
         image: String(payload.image || ''),
+        images: Array.isArray(payload.images) ? payload.images : undefined,
         model3d: String(payload.model3d || payload.model3d || ''),
         arModel: String(payload.arModel || payload.arModel || ''),
         specifications: Array.isArray(payload.specifications) ? payload.specifications : [],
         price: typeof payload.price === 'number' ? payload.price : Number(payload.price),
         isActive: payload.isActive ?? true,
+        pricingTableId: payload.pricingTableId ? String(payload.pricingTableId) : undefined,
         createdAt: now,
         updatedAt: now
     };
@@ -115,17 +160,26 @@ app.post('/products', authenticate, requireAdmin, [(0, express_validator_1.body)
     await eventBus.publish('products.created', event);
     res.status(201).json(toProductResponse(product));
 });
-app.put('/products/:id', authenticate, requireAdmin, [(0, express_validator_1.param)('id').isLength({ min: 1 })], async (req, res) => {
+app.put('/products/:id', authenticate, requireAdminOrBusiness, [(0, express_validator_1.param)('id').isLength({ min: 1 })], async (req, res) => {
     const errors = (0, express_validator_1.validationResult)(req);
     if (!errors.isEmpty())
         return res.status(400).json({ errors: errors.array() });
+    const role = req.user.role.toLowerCase();
+    const currentUser = await getCurrentUser(req);
+    if (!currentUser)
+        return res.status(401).json({ error: 'User not found' });
     const productId = req.params.id;
     const existing = await productsCollection().findOne({ _id: productId });
     if (!existing)
         return res.status(404).json({ error: 'Product not found' });
+    if (!canAccessBusiness(role, currentUser, existing.businessId))
+        return res.status(403).json({ error: 'Insufficient permissions' });
     const updates = req.body;
     delete updates._id;
     delete updates.createdAt;
+    if (role !== 'admin') {
+        delete updates.businessId;
+    }
     updates.updatedAt = new Date();
     const result = await productsCollection().updateOne({ _id: productId }, { $set: updates });
     if (result.matchedCount === 0)
@@ -145,14 +199,20 @@ app.put('/products/:id', authenticate, requireAdmin, [(0, express_validator_1.pa
     await eventBus.publish('products.updated', event);
     res.json(toProductResponse(updated));
 });
-app.delete('/products/:id', authenticate, requireAdmin, [(0, express_validator_1.param)('id').isLength({ min: 1 })], async (req, res) => {
+app.delete('/products/:id', authenticate, requireAdminOrBusiness, [(0, express_validator_1.param)('id').isLength({ min: 1 })], async (req, res) => {
     const errors = (0, express_validator_1.validationResult)(req);
     if (!errors.isEmpty())
         return res.status(400).json({ errors: errors.array() });
+    const role = req.user.role.toLowerCase();
+    const currentUser = await getCurrentUser(req);
+    if (!currentUser)
+        return res.status(401).json({ error: 'User not found' });
     const productId = req.params.id;
     const existing = await productsCollection().findOne({ _id: productId });
     if (!existing)
         return res.status(404).json({ error: 'Product not found' });
+    if (!canAccessBusiness(role, currentUser, existing.businessId))
+        return res.status(403).json({ error: 'Insufficient permissions' });
     await productsCollection().deleteOne({ _id: productId });
     const event = {
         id: crypto_1.default.randomUUID(),
