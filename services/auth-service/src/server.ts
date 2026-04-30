@@ -132,6 +132,22 @@ app.post(
     }
 
     if (!user) return res.status(400).json({ error: 'Invalid or expired verification token' });
+    if (user.emailVerified) {
+      return res.json({
+        status: 'OK',
+        user: {
+          id: String(user._id),
+          email: user.email,
+          name: user.name,
+          role: user.role,
+          businessId: user.businessId,
+          permissions: user.permissions,
+          isActive: user.isActive,
+          emailVerified: true,
+          createdAt: user.createdAt?.toISOString?.() || new Date().toISOString()
+        }
+      });
+    }
     if (!user.verificationToken || user.verificationToken !== token) {
       return res.status(400).json({ error: 'Invalid or expired verification token' });
     }
