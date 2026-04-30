@@ -35,9 +35,10 @@ const DEFAULT_ALLOWED_ORIGINS = [
 ];
 
 const normalizeOrigin = (value: string): string => value.trim().replace(/\/+$/, '').toLowerCase();
-const EFFECTIVE_ALLOWED_ORIGINS = (CORS_ORIGINS.length > 0
-  ? CORS_ORIGINS
-  : (process.env.NODE_ENV === 'production' ? DEFAULT_ALLOWED_ORIGINS : [])
+const EFFECTIVE_ALLOWED_ORIGINS = (
+  CORS_ORIGINS.length > 0
+    ? [...DEFAULT_ALLOWED_ORIGINS, ...CORS_ORIGINS]
+    : (process.env.NODE_ENV === 'production' ? DEFAULT_ALLOWED_ORIGINS : [])
 ).map(normalizeOrigin);
 
 const app = express();

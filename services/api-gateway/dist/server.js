@@ -37,7 +37,7 @@ const DEFAULT_ALLOWED_ORIGINS = [
 ];
 const normalizeOrigin = (value) => value.trim().replace(/\/+$/, '').toLowerCase();
 const EFFECTIVE_ALLOWED_ORIGINS = (CORS_ORIGINS.length > 0
-    ? CORS_ORIGINS
+    ? [...DEFAULT_ALLOWED_ORIGINS, ...CORS_ORIGINS]
     : (process.env.NODE_ENV === 'production' ? DEFAULT_ALLOWED_ORIGINS : [])).map(normalizeOrigin);
 const app = (0, express_1.default)();
 app.use((0, helmet_1.default)({ crossOriginResourcePolicy: false }));
