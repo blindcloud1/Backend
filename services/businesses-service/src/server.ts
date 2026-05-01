@@ -1,7 +1,7 @@
 import dotenv from 'dotenv';
 import express, { Request, Response, NextFunction } from 'express';
 import helmet from 'helmet';
-import { body, validationResult } from 'express-validator';
+import { body, param, validationResult } from 'express-validator';
 import jwt from 'jsonwebtoken';
 import { MongoClient } from 'mongodb';
 import crypto from 'crypto';
@@ -200,6 +200,77 @@ app.put('/businesses/:id', authenticate, requireAdminOrBusiness, async (req: Aut
 
   res.json({ ...updated, createdAt: updated.createdAt.toISOString(), updatedAt: updated.updatedAt?.toISOString() });
 });
+
+app.delete(
+  '/businesses/:id',
+  authenticate,
+  requireAdmin,
+  [param('id').isLength({ min: 1 })],
+  async (req: AuthRequest, res: Response) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+
+    const businessId = req.params.id;
+    const existing = await businessesCollection().findOne({ _id: businessId } as any);
+    if (!existing) return res.status(404).json({ error: 'Business not found' });
+
+    const userIds = (await usersCollection()
+      .find({ businessId } as any)
+      .project({ _id: 1 } as any)
+      .toArray()
+    ).map(u => String((u as any)._id));
+
+    const deleted: Record<string, number> = {};
+
+    const deleteMany = async (collectionName: string, filter: any) => {
+      const result = await mongo.db('blindscloud').collection(collectionName).deleteMany(filter);
+      deleted[collectionName] = result.deletedCount || 0;
+    };
+
+    try {
+      if (userIds.length > 0) {
+        await deleteMany('notifications', { userId: { $in: userIds } });
+        await deleteMany('push_subscriptions', { userId: { $in: userIds } });
+        await deleteMany('module_permissions', { userId: { $in: userIds } });
+        await deleteMany('activity_logs', { userId: { $in: userIds } });
+      } else {
+        deleted['notifications'] = 0;
+        deleted['push_subscriptions'] = 0;
+        deleted['module_permissions'] = 0;
+        deleted['activity_logs'] = 0;
+      }
+
+      const usersResult = await usersCollection().deleteMany({ businessId } as any);
+      deleted['users'] = usersResult.deletedCount || 0;
+
+      await deleteMany('jobs', { businessId });
+      await deleteMany('customers', { businessId });
+      await deleteMany('products', { businessId });
+      await deleteMany('pricing_tables', { businessId });
+      await deleteMany('orders', { businessId });
+      await deleteMany('business_settings', { businessId });
+      await deleteMany('model_permissions', { businessId });
+
+      const businessResult = await businessesCollection().deleteOne({ _id: businessId } as any);
+      deleted['businesses'] = businessResult.deletedCount || 0;
+
+      const event: CloudEvent<{ businessId: string }> = {
+        id: crypto.randomUUID(),
+        type: 'businesses.deleted',
+        version: 1,
+        source: 'businesses-service',
+        occurredAt: new Date().toISOString(),
+        correlationId: req.header('x-correlation-id') || undefined,
+        payload: { businessId }
+      };
+      await eventBus.publish('businesses.deleted', event);
+
+      res.json({ status: 'OK', deleted });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || String(err) });
+    }
+  }
+);
 
 app.get('/businesses/:id/settings', authenticate, async (req: AuthRequest, res: Response) => {
   const role = req.user!.role.toLowerCase();

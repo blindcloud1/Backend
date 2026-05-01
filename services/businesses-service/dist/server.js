@@ -187,6 +187,63 @@ app.put('/businesses/:id', authenticate, requireAdminOrBusiness, async (req, res
     await eventBus.publish('businesses.updated', event);
     res.json({ ...updated, createdAt: updated.createdAt.toISOString(), updatedAt: updated.updatedAt?.toISOString() });
 });
+app.delete('/businesses/:id', authenticate, requireAdmin, [(0, express_validator_1.param)('id').isLength({ min: 1 })], async (req, res) => {
+    const errors = (0, express_validator_1.validationResult)(req);
+    if (!errors.isEmpty())
+        return res.status(400).json({ errors: errors.array() });
+    const businessId = req.params.id;
+    const existing = await businessesCollection().findOne({ _id: businessId });
+    if (!existing)
+        return res.status(404).json({ error: 'Business not found' });
+    const userIds = (await usersCollection()
+        .find({ businessId })
+        .project({ _id: 1 })
+        .toArray()).map(u => String(u._id));
+    const deleted = {};
+    const deleteMany = async (collectionName, filter) => {
+        const result = await mongo.db('blindscloud').collection(collectionName).deleteMany(filter);
+        deleted[collectionName] = result.deletedCount || 0;
+    };
+    try {
+        if (userIds.length > 0) {
+            await deleteMany('notifications', { userId: { $in: userIds } });
+            await deleteMany('push_subscriptions', { userId: { $in: userIds } });
+            await deleteMany('module_permissions', { userId: { $in: userIds } });
+            await deleteMany('activity_logs', { userId: { $in: userIds } });
+        }
+        else {
+            deleted['notifications'] = 0;
+            deleted['push_subscriptions'] = 0;
+            deleted['module_permissions'] = 0;
+            deleted['activity_logs'] = 0;
+        }
+        const usersResult = await usersCollection().deleteMany({ businessId });
+        deleted['users'] = usersResult.deletedCount || 0;
+        await deleteMany('jobs', { businessId });
+        await deleteMany('customers', { businessId });
+        await deleteMany('products', { businessId });
+        await deleteMany('pricing_tables', { businessId });
+        await deleteMany('orders', { businessId });
+        await deleteMany('business_settings', { businessId });
+        await deleteMany('model_permissions', { businessId });
+        const businessResult = await businessesCollection().deleteOne({ _id: businessId });
+        deleted['businesses'] = businessResult.deletedCount || 0;
+        const event = {
+            id: crypto_1.default.randomUUID(),
+            type: 'businesses.deleted',
+            version: 1,
+            source: 'businesses-service',
+            occurredAt: new Date().toISOString(),
+            correlationId: req.header('x-correlation-id') || undefined,
+            payload: { businessId }
+        };
+        await eventBus.publish('businesses.deleted', event);
+        res.json({ status: 'OK', deleted });
+    }
+    catch (err) {
+        res.status(500).json({ error: err?.message || String(err) });
+    }
+});
 app.get('/businesses/:id/settings', authenticate, async (req, res) => {
     const role = req.user.role.toLowerCase();
     const currentUser = await getCurrentUser(req);
