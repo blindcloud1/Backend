@@ -222,6 +222,10 @@ app.put('/orders/:id', authenticate, [param('id').isLength({ min: 1 })], async (
   if (!order) return res.status(404).json({ error: 'Order not found' });
   if (!canViewOrder(role, currentUser, order)) return res.status(403).json({ error: 'Insufficient permissions' });
 
+  if (role === 'merchant' && order.status !== 'pending') {
+    return res.status(403).json({ error: 'Order can no longer be edited' });
+  }
+
   const updates = req.body as Partial<OrderDoc>;
   delete (updates as any)._id;
   delete (updates as any).createdAt;
@@ -238,23 +242,35 @@ app.put('/orders/:id', authenticate, [param('id').isLength({ min: 1 })], async (
 
   if (role === 'merchant') {
     delete set.seenByBusiness;
-    delete set.manualPricing;
-    delete set.total;
-    delete set.currency;
-    delete set.windowName;
-    delete set.productId;
-    delete set.productName;
-    delete set.category;
-    delete set.width;
-    delete set.height;
-    delete set.unit;
+    delete set.createdByUserId;
+    delete set.merchantId;
+    delete set.businessId;
     if (typeof set.status === 'string') {
-      if (set.status !== 'cancelled') delete set.status;
-      else set.editedAt = now;
+      if (set.status !== 'cancelled') {
+        delete set.status;
+      } else {
+        set.editedAt = now;
+      }
     }
+    if (typeof set.unit !== 'undefined' && !isOrderUnit(set.unit)) {
+      return res.status(400).json({ error: 'Invalid unit' });
+    }
+    set.editedAt = now;
   }
 
   if (role === 'business') {
+    const allowed: any = {
+      status: set.status,
+      seenByBusiness: set.seenByBusiness,
+      note: set.note,
+      total: set.total,
+      manualPricing: set.manualPricing,
+      currency: set.currency,
+      updatedAt: set.updatedAt
+    };
+    for (const key of Object.keys(set)) {
+      if (!(key in allowed)) delete set[key];
+    }
     if (typeof set.status === 'string') {
       if (!isOrderStatus(set.status)) delete set.status;
       else {
@@ -296,6 +312,41 @@ app.put('/orders/:id', authenticate, [param('id').isLength({ min: 1 })], async (
   await eventBus.publish('orders.updated', event);
 
   res.json(toOrderResponse(updated));
+});
+
+app.delete('/orders/:id', authenticate, [param('id').isLength({ min: 1 })], async (req: AuthRequest, res: Response) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+
+  const role = req.user!.role.toLowerCase();
+  const currentUser = await getCurrentUser(req);
+  if (!currentUser) return res.status(401).json({ error: 'User not found' });
+
+  const id = req.params.id;
+  const order = await ordersCollection().findOne({ _id: id } as any);
+  if (!order) return res.status(404).json({ error: 'Order not found' });
+  if (!canViewOrder(role, currentUser, order)) return res.status(403).json({ error: 'Insufficient permissions' });
+
+  if (role === 'merchant') {
+    if (order.status !== 'pending') return res.status(403).json({ error: 'Order can no longer be deleted' });
+  } else if (role !== 'admin') {
+    return res.status(403).json({ error: 'Insufficient permissions' });
+  }
+
+  await ordersCollection().deleteOne({ _id: id } as any);
+
+  const event: CloudEvent<{ orderId: string; businessId: string; merchantId: string }> = {
+    id: crypto.randomUUID(),
+    type: 'orders.deleted',
+    version: 1,
+    source: 'orders-service',
+    occurredAt: new Date().toISOString(),
+    correlationId: req.header('x-correlation-id') || undefined,
+    payload: { orderId: id, businessId: order.businessId, merchantId: order.merchantId }
+  };
+  await eventBus.publish('orders.deleted', event);
+
+  res.json({ status: 'OK' });
 });
 
 app.listen(PORT, '0.0.0.0', async () => {
