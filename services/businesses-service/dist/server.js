@@ -80,6 +80,9 @@ const canAccessBusiness = (role, currentUser, businessId) => {
         return true;
     return Boolean(currentUser.businessId && currentUser.businessId === businessId);
 };
+const escapeRegExp = (value) => {
+    return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+};
 const app = (0, express_1.default)();
 app.use(express_1.default.json({ limit: '2mb' }));
 app.use((0, helmet_1.default)());
@@ -121,11 +124,22 @@ app.get('/businesses/:id', authenticate, async (req, res) => {
         return res.status(404).json({ error: 'Business not found' });
     return res.json({ ...business, createdAt: business.createdAt.toISOString(), updatedAt: business.updatedAt?.toISOString() });
 });
-app.post('/businesses', authenticate, requireAdmin, [(0, express_validator_1.body)('name').isLength({ min: 1 }), (0, express_validator_1.body)('address').optional().isString()], async (req, res) => {
+app.post('/businesses', authenticate, requireAdmin, [(0, express_validator_1.body)('name').isLength({ min: 1 }), (0, express_validator_1.body)('address').optional().isString(), (0, express_validator_1.body)('email').optional().isEmail().normalizeEmail()], async (req, res) => {
     const errors = (0, express_validator_1.validationResult)(req);
     if (!errors.isEmpty())
         return res.status(400).json({ errors: errors.array() });
     const payload = req.body;
+    const normalizedEmail = typeof payload.email === 'string' ? payload.email.trim().toLowerCase() : '';
+    if (normalizedEmail) {
+        const emailRegex = new RegExp(`^${escapeRegExp(normalizedEmail)}$`, 'i');
+        const [existingBusiness, existingUser] = await Promise.all([
+            businessesCollection().findOne({ email: emailRegex }),
+            usersCollection().findOne({ email: emailRegex })
+        ]);
+        if (existingBusiness || existingUser) {
+            return res.status(409).json({ error: 'Email already exists' });
+        }
+    }
     const now = new Date();
     const requestedId = normalizeBusinessId(payload._id) ||
         normalizeBusinessId(payload.id) ||
@@ -135,7 +149,7 @@ app.post('/businesses', authenticate, requireAdmin, [(0, express_validator_1.bod
         name: String(payload.name || ''),
         address: typeof payload.address === 'string' ? payload.address : '',
         phone: payload.phone,
-        email: payload.email,
+        email: normalizedEmail || undefined,
         adminId: payload.adminId,
         features: Array.isArray(payload.features) ? payload.features : [],
         subscription: (payload.subscription || 'basic'),
@@ -168,7 +182,25 @@ app.put('/businesses/:id', authenticate, requireAdminOrBusiness, async (req, res
     const updates = req.body;
     delete updates._id;
     delete updates.createdAt;
+    delete updates.adminId;
     updates.updatedAt = new Date();
+    if (typeof updates.email === 'string') {
+        const normalizedEmail = updates.email.trim().toLowerCase();
+        if (normalizedEmail) {
+            const emailRegex = new RegExp(`^${escapeRegExp(normalizedEmail)}$`, 'i');
+            const [existingBusiness, existingUser] = await Promise.all([
+                businessesCollection().findOne({ _id: { $ne: businessId }, email: emailRegex }),
+                usersCollection().findOne({ email: emailRegex })
+            ]);
+            if (existingBusiness || existingUser) {
+                return res.status(409).json({ error: 'Email already exists' });
+            }
+            updates.email = normalizedEmail;
+        }
+        else {
+            delete updates.email;
+        }
+    }
     const result = await businessesCollection().updateOne({ _id: businessId }, { $set: updates });
     if (result.matchedCount === 0)
         return res.status(404).json({ error: 'Business not found' });

@@ -7,7 +7,7 @@ import jwt from 'jsonwebtoken';
 import { MongoClient } from 'mongodb';
 import crypto from 'crypto';
 import { EventBus, type CloudEvent } from '@blindscloud/event-bus';
-import type { UserDoc, UserRole } from '@blindscloud/models';
+import type { BusinessDoc, UserDoc, UserRole } from '@blindscloud/models';
 import https from 'https';
 
 dotenv.config();
@@ -42,6 +42,11 @@ const eventBus = new EventBus({
 });
 
 const usersCollection = () => mongo.db('blindscloud').collection<UserDoc>('users');
+const businessesCollection = () => mongo.db('blindscloud').collection<BusinessDoc>('businesses');
+
+const escapeRegExp = (value: string): string => {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+};
 
 class EmailConfigError extends Error {
   override name = 'EmailConfigError';
@@ -158,6 +163,104 @@ const requireAdminOrBusiness = (req: AuthRequest, res: Response, next: NextFunct
 const app = express();
 app.use(express.json({ limit: '2mb' }));
 app.use(helmet());
+
+app.post(
+  '/public-signup',
+  [
+    body('name').isLength({ min: 1 }),
+    body('companyName').isLength({ min: 1 }),
+    body('email').isEmail().normalizeEmail(),
+    body('password').isLength({ min: 8 }),
+    body('phone').optional().isString()
+  ],
+  async (req: Request, res: Response) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+
+    const payload = req.body as {
+      name: string;
+      companyName: string;
+      email: string;
+      password: string;
+      phone?: string;
+    };
+
+    const email = String(payload.email || '').trim().toLowerCase();
+    const emailRegex = new RegExp(`^${escapeRegExp(email)}$`, 'i');
+
+    const [existingUser, existingBusiness] = await Promise.all([
+      usersCollection().findOne({ email: emailRegex } as any),
+      businessesCollection().findOne({ email: emailRegex } as any)
+    ]);
+    if (existingUser || existingBusiness) {
+      return res.status(409).json({ error: 'Email already exists' });
+    }
+
+    const now = new Date();
+    const businessId = crypto.randomUUID();
+    const business: BusinessDoc = {
+      _id: businessId,
+      name: String(payload.companyName || ''),
+      address: '',
+      phone: payload.phone ? String(payload.phone) : undefined,
+      email,
+      adminId: undefined,
+      features: ['job_management', 'calendar', 'reports', 'public_signup_pending'],
+      subscription: 'basic' as any,
+      vrViewEnabled: false,
+      createdAt: now,
+      updatedAt: now
+    };
+
+    const verificationToken = crypto.randomUUID();
+    const passwordHash = await bcrypt.hash(String(payload.password), 10);
+    const userId = crypto.randomUUID();
+    const newUser: UserDoc = {
+      _id: userId,
+      email,
+      name: String(payload.name || ''),
+      passwordHash: passwordHash as any,
+      role: 'business',
+      businessId,
+      permissions: ['manage_employees', 'view_dashboard', 'create_jobs', 'manage_products', 'view_reports'],
+      isActive: false,
+      emailVerified: false,
+      verificationToken,
+      createdBy: 'public_signup',
+      createdAt: now,
+      updatedAt: now
+    };
+
+    try {
+      await businessesCollection().insertOne(business as any);
+      await usersCollection().insertOne(newUser as any);
+      await businessesCollection().updateOne({ _id: businessId } as any, { $set: { adminId: userId, updatedAt: new Date() } } as any);
+
+      await sendVerificationEmail({ to: email, token: verificationToken, setPassword: false });
+
+      const event: CloudEvent<{ userId: string; email: string; role: string; businessId: string }> = {
+        id: crypto.randomUUID(),
+        type: 'publicSignup.created',
+        version: 1,
+        source: 'users-service',
+        occurredAt: new Date().toISOString(),
+        correlationId: req.header('x-correlation-id') || undefined,
+        payload: { userId, email, role: 'business', businessId }
+      };
+      await eventBus.publish('publicSignup.created', event);
+
+      res.status(201).json({ status: 'OK', businessId, userId, verificationEmailSent: true });
+    } catch (err: any) {
+      try {
+        await usersCollection().deleteOne({ _id: userId } as any);
+        await businessesCollection().deleteOne({ _id: businessId } as any);
+      } catch {
+        void 0;
+      }
+      res.status(500).json({ error: err?.message || String(err) });
+    }
+  }
+);
 
 app.get('/health', async (_req: Request, res: Response) => {
   try {

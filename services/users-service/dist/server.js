@@ -36,6 +36,10 @@ const eventBus = new event_bus_1.EventBus({
     serviceName: 'users-service'
 });
 const usersCollection = () => mongo.db('blindscloud').collection('users');
+const businessesCollection = () => mongo.db('blindscloud').collection('businesses');
+const escapeRegExp = (value) => {
+    return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+};
 class EmailConfigError extends Error {
     name = 'EmailConfigError';
 }
@@ -142,6 +146,87 @@ const requireAdminOrBusiness = (req, res, next) => {
 const app = (0, express_1.default)();
 app.use(express_1.default.json({ limit: '2mb' }));
 app.use((0, helmet_1.default)());
+app.post('/public-signup', [
+    (0, express_validator_1.body)('name').isLength({ min: 1 }),
+    (0, express_validator_1.body)('companyName').isLength({ min: 1 }),
+    (0, express_validator_1.body)('email').isEmail().normalizeEmail(),
+    (0, express_validator_1.body)('password').isLength({ min: 8 }),
+    (0, express_validator_1.body)('phone').optional().isString()
+], async (req, res) => {
+    const errors = (0, express_validator_1.validationResult)(req);
+    if (!errors.isEmpty())
+        return res.status(400).json({ errors: errors.array() });
+    const payload = req.body;
+    const email = String(payload.email || '').trim().toLowerCase();
+    const emailRegex = new RegExp(`^${escapeRegExp(email)}$`, 'i');
+    const [existingUser, existingBusiness] = await Promise.all([
+        usersCollection().findOne({ email: emailRegex }),
+        businessesCollection().findOne({ email: emailRegex })
+    ]);
+    if (existingUser || existingBusiness) {
+        return res.status(409).json({ error: 'Email already exists' });
+    }
+    const now = new Date();
+    const businessId = crypto_1.default.randomUUID();
+    const business = {
+        _id: businessId,
+        name: String(payload.companyName || ''),
+        address: '',
+        phone: payload.phone ? String(payload.phone) : undefined,
+        email,
+        adminId: undefined,
+        features: ['job_management', 'calendar', 'reports', 'public_signup_pending'],
+        subscription: 'basic',
+        vrViewEnabled: false,
+        createdAt: now,
+        updatedAt: now
+    };
+    const verificationToken = crypto_1.default.randomUUID();
+    const passwordHash = await bcryptjs_1.default.hash(String(payload.password), 10);
+    const userId = crypto_1.default.randomUUID();
+    const newUser = {
+        _id: userId,
+        email,
+        name: String(payload.name || ''),
+        passwordHash: passwordHash,
+        role: 'business',
+        businessId,
+        permissions: ['manage_employees', 'view_dashboard', 'create_jobs', 'manage_products', 'view_reports'],
+        isActive: false,
+        emailVerified: false,
+        verificationToken,
+        createdBy: 'public_signup',
+        createdAt: now,
+        updatedAt: now
+    };
+    try {
+        await businessesCollection().insertOne(business);
+        await usersCollection().insertOne(newUser);
+        await businessesCollection().updateOne({ _id: businessId }, { $set: { adminId: userId, updatedAt: new Date() } });
+        await sendVerificationEmail({ to: email, token: verificationToken, setPassword: false });
+        const event = {
+            id: crypto_1.default.randomUUID(),
+            type: 'publicSignup.created',
+            version: 1,
+            source: 'users-service',
+            occurredAt: new Date().toISOString(),
+            correlationId: req.header('x-correlation-id') || undefined,
+            payload: { userId, email, role: 'business', businessId }
+        };
+        await eventBus.publish('publicSignup.created', event);
+        res.status(201).json({ status: 'OK', businessId, userId, verificationEmailSent: true });
+    }
+    catch (err) {
+        try {
+            await usersCollection().deleteOne({ _id: userId });
+            await businessesCollection().deleteOne({ _id: businessId });
+        }
+        catch {
+            void 0;
+        }
+        res.status(500).json({ error: err?.message || String(err) });
+    }
+});
 app.get('/health', async (_req, res) => {
     try {
         await mongo.db('admin').command({ ping: 1 });
