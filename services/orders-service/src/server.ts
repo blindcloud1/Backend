@@ -68,14 +68,24 @@ const canViewOrder = (role: string, currentUser: UserDoc, order: OrderDoc): bool
   return false;
 };
 
+const toIso = (value: any): string | undefined => {
+  if (!value) return undefined;
+  if (value instanceof Date) return value.toISOString();
+  if (typeof value === 'string') {
+    const d = new Date(value);
+    if (!Number.isNaN(d.getTime())) return d.toISOString();
+  }
+  return undefined;
+};
+
 const toOrderResponse = (o: OrderDoc) => ({
   ...o,
-  createdAt: o.createdAt.toISOString(),
-  updatedAt: o.updatedAt?.toISOString(),
-  acceptedAt: o.acceptedAt?.toISOString(),
-  readyAt: o.readyAt?.toISOString(),
-  deliveredAt: o.deliveredAt?.toISOString(),
-  editedAt: o.editedAt?.toISOString()
+  createdAt: toIso((o as any).createdAt) || new Date().toISOString(),
+  updatedAt: toIso((o as any).updatedAt),
+  acceptedAt: toIso((o as any).acceptedAt),
+  readyAt: toIso((o as any).readyAt),
+  deliveredAt: toIso((o as any).deliveredAt),
+  editedAt: toIso((o as any).editedAt)
 });
 
 const app = express();
@@ -221,6 +231,10 @@ app.put('/orders/:id', authenticate, [param('id').isLength({ min: 1 })], async (
 
   const now = new Date();
   const set: any = { ...updates, updatedAt: now };
+  delete set.acceptedAt;
+  delete set.readyAt;
+  delete set.deliveredAt;
+  delete set.editedAt;
 
   if (role === 'merchant') {
     delete set.seenByBusiness;
@@ -244,9 +258,9 @@ app.put('/orders/:id', authenticate, [param('id').isLength({ min: 1 })], async (
     if (typeof set.status === 'string') {
       if (!isOrderStatus(set.status)) delete set.status;
       else {
-        if (set.status === 'accepted') set.acceptedAt = now;
-        if (set.status === 'ready') set.readyAt = now;
-        if (set.status === 'delivered') set.deliveredAt = now;
+        if (set.status === 'accepted' && !(order as any).acceptedAt) set.acceptedAt = now;
+        if (set.status === 'ready' && !(order as any).readyAt) set.readyAt = now;
+        if (set.status === 'delivered' && !(order as any).deliveredAt) set.deliveredAt = now;
         if (set.status === 'cancelled') set.editedAt = now;
       }
     }
@@ -257,9 +271,9 @@ app.put('/orders/:id', authenticate, [param('id').isLength({ min: 1 })], async (
 
   if (role === 'admin') {
     if (typeof set.status === 'string' && isOrderStatus(set.status)) {
-      if (set.status === 'accepted') set.acceptedAt = now;
-      if (set.status === 'ready') set.readyAt = now;
-      if (set.status === 'delivered') set.deliveredAt = now;
+      if (set.status === 'accepted' && !(order as any).acceptedAt) set.acceptedAt = now;
+      if (set.status === 'ready' && !(order as any).readyAt) set.readyAt = now;
+      if (set.status === 'delivered' && !(order as any).deliveredAt) set.deliveredAt = now;
       if (set.status === 'cancelled') set.editedAt = now;
     } else {
       delete set.status;
@@ -288,4 +302,3 @@ app.listen(PORT, '0.0.0.0', async () => {
   await mongo.connect();
   await eventBus.connect();
 });
-

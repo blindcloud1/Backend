@@ -65,14 +65,26 @@ const canViewOrder = (role, currentUser, order) => {
         return order.merchantId === currentUser._id;
     return false;
 };
+const toIso = (value) => {
+    if (!value)
+        return undefined;
+    if (value instanceof Date)
+        return value.toISOString();
+    if (typeof value === 'string') {
+        const d = new Date(value);
+        if (!Number.isNaN(d.getTime()))
+            return d.toISOString();
+    }
+    return undefined;
+};
 const toOrderResponse = (o) => ({
     ...o,
-    createdAt: o.createdAt.toISOString(),
-    updatedAt: o.updatedAt?.toISOString(),
-    acceptedAt: o.acceptedAt?.toISOString(),
-    readyAt: o.readyAt?.toISOString(),
-    deliveredAt: o.deliveredAt?.toISOString(),
-    editedAt: o.editedAt?.toISOString()
+    createdAt: toIso(o.createdAt) || new Date().toISOString(),
+    updatedAt: toIso(o.updatedAt),
+    acceptedAt: toIso(o.acceptedAt),
+    readyAt: toIso(o.readyAt),
+    deliveredAt: toIso(o.deliveredAt),
+    editedAt: toIso(o.editedAt)
 });
 const app = (0, express_1.default)();
 app.use(express_1.default.json({ limit: '2mb' }));
@@ -217,6 +229,10 @@ app.put('/orders/:id', authenticate, [(0, express_validator_1.param)('id').isLen
     delete updates.createdByUserId;
     const now = new Date();
     const set = { ...updates, updatedAt: now };
+    delete set.acceptedAt;
+    delete set.readyAt;
+    delete set.deliveredAt;
+    delete set.editedAt;
     if (role === 'merchant') {
         delete set.seenByBusiness;
         delete set.manualPricing;
@@ -241,11 +257,11 @@ app.put('/orders/:id', authenticate, [(0, express_validator_1.param)('id').isLen
             if (!isOrderStatus(set.status))
                 delete set.status;
             else {
-                if (set.status === 'accepted')
+                if (set.status === 'accepted' && !order.acceptedAt)
                     set.acceptedAt = now;
-                if (set.status === 'ready')
+                if (set.status === 'ready' && !order.readyAt)
                     set.readyAt = now;
-                if (set.status === 'delivered')
+                if (set.status === 'delivered' && !order.deliveredAt)
                     set.deliveredAt = now;
                 if (set.status === 'cancelled')
                     set.editedAt = now;
@@ -257,11 +273,11 @@ app.put('/orders/:id', authenticate, [(0, express_validator_1.param)('id').isLen
     }
     if (role === 'admin') {
         if (typeof set.status === 'string' && isOrderStatus(set.status)) {
-            if (set.status === 'accepted')
+            if (set.status === 'accepted' && !order.acceptedAt)
                 set.acceptedAt = now;
-            if (set.status === 'ready')
+            if (set.status === 'ready' && !order.readyAt)
                 set.readyAt = now;
-            if (set.status === 'delivered')
+            if (set.status === 'delivered' && !order.deliveredAt)
                 set.deliveredAt = now;
             if (set.status === 'cancelled')
                 set.editedAt = now;
