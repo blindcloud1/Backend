@@ -57,10 +57,16 @@ const handleLogin = async (req, res) => {
     const user = await users.findOne({ email: email.toLowerCase() });
     if (!user)
         return res.status(401).json({ error: 'Invalid credentials' });
-    if (!user.isActive && user.role !== 'admin')
-        return res.status(403).json({ error: 'Account blocked' });
     if (!user.emailVerified && user.role !== 'admin')
         return res.status(403).json({ error: 'Email not verified' });
+    if (!user.isActive && user.role !== 'admin') {
+        const createdBy = String(user.createdBy || '').toLowerCase();
+        const isPublicSignup = createdBy === 'public_signup' || createdBy === 'public-signup' || createdBy === 'publicsignup';
+        if (user.role === 'business' && isPublicSignup) {
+            return res.status(403).json({ error: 'Account pending admin approval' });
+        }
+        return res.status(403).json({ error: 'Account blocked' });
+    }
     if (!user.passwordHash)
         return res.status(401).json({ error: 'Invalid credentials' });
     const ok = await bcryptjs_1.default.compare(password, user.passwordHash);
