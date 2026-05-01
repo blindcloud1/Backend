@@ -31,6 +31,7 @@ const eventBus = new event_bus_1.EventBus({
 });
 const notificationsCollection = () => mongo.db('blindscloud').collection('notifications');
 const pushSubscriptionsCollection = () => mongo.db('blindscloud').collection('push_subscriptions');
+const usersCollection = () => mongo.db('blindscloud').collection('users');
 const authenticate = (req, res, next) => {
     const header = req.header('authorization') || req.header('Authorization');
     if (!header)
@@ -53,6 +54,28 @@ const requireAdmin = (req, res, next) => {
         return next();
     return res.status(403).json({ error: 'Insufficient permissions' });
 };
+const requireAdminOrBusiness = (req, res, next) => {
+    const role = req.user?.role?.toLowerCase();
+    if (role === 'admin' || role === 'business')
+        return next();
+    return res.status(403).json({ error: 'Insufficient permissions' });
+};
+const getCurrentUser = async (req) => {
+    return usersCollection().findOne({ _id: req.user.id });
+};
+const canNotifyRecipient = (role, currentUser, recipient) => {
+    if (role === 'admin')
+        return true;
+    if (role !== 'business')
+        return false;
+    const currentKeys = [currentUser.businessId, currentUser._id].filter(Boolean).map(String);
+    const recipientKeys = [recipient.businessId, recipient.parentId, recipient.createdBy].filter(Boolean).map(String);
+    for (const key of currentKeys) {
+        if (recipientKeys.includes(key))
+            return true;
+    }
+    return false;
+};
 const toNotificationResponse = (n) => ({
     ...n,
     createdAt: n.createdAt.toISOString()
@@ -73,7 +96,8 @@ const isValidNotificationType = (value) => {
         'job_completed',
         'quotation_sent',
         'receipt_sent',
-        'followup_sent'
+        'followup_sent',
+        'order_status'
     ].includes(String(value));
 };
 const app = (0, express_1.default)();
@@ -96,11 +120,20 @@ app.get('/notifications', authenticate, async (req, res) => {
     const notifications = await notificationsCollection().find(filter).sort({ createdAt: -1 }).limit(200).toArray();
     res.json(notifications.map(toNotificationResponse));
 });
-app.post('/notifications', authenticate, requireAdmin, [(0, express_validator_1.body)('userId').isLength({ min: 1 }), (0, express_validator_1.body)('title').isLength({ min: 1 }), (0, express_validator_1.body)('message').isLength({ min: 1 })], async (req, res) => {
+app.post('/notifications', authenticate, requireAdminOrBusiness, [(0, express_validator_1.body)('userId').isLength({ min: 1 }), (0, express_validator_1.body)('title').isLength({ min: 1 }), (0, express_validator_1.body)('message').isLength({ min: 1 })], async (req, res) => {
     const errors = (0, express_validator_1.validationResult)(req);
     if (!errors.isEmpty())
         return res.status(400).json({ errors: errors.array() });
+    const role = req.user.role.toLowerCase();
+    const currentUser = await getCurrentUser(req);
+    if (!currentUser)
+        return res.status(401).json({ error: 'User not found' });
     const payload = req.body;
+    const recipient = await usersCollection().findOne({ _id: payload.userId });
+    if (!recipient)
+        return res.status(404).json({ error: 'Recipient user not found' });
+    if (!canNotifyRecipient(role, currentUser, recipient))
+        return res.status(403).json({ error: 'Insufficient permissions' });
     const type = payload.type && isValidNotificationType(payload.type) ? payload.type : 'system';
     const notification = {
         _id: crypto_1.default.randomUUID(),

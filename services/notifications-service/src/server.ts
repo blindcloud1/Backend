@@ -6,7 +6,7 @@ import jwt from 'jsonwebtoken';
 import { MongoClient } from 'mongodb';
 import crypto from 'crypto';
 import { EventBus, type CloudEvent } from '@blindscloud/event-bus';
-import type { NotificationDoc, NotificationType, PushSubscriptionDoc, UserRole } from '@blindscloud/models';
+import type { NotificationDoc, NotificationType, PushSubscriptionDoc, UserDoc, UserRole } from '@blindscloud/models';
 
 dotenv.config();
 
@@ -32,6 +32,7 @@ const eventBus = new EventBus({
 
 const notificationsCollection = () => mongo.db('blindscloud').collection<NotificationDoc>('notifications');
 const pushSubscriptionsCollection = () => mongo.db('blindscloud').collection<PushSubscriptionDoc>('push_subscriptions');
+const usersCollection = () => mongo.db('blindscloud').collection<UserDoc>('users');
 
 const authenticate = (req: AuthRequest, res: Response, next: NextFunction) => {
   const header = req.header('authorization') || req.header('Authorization');
@@ -53,6 +54,29 @@ const requireAdmin = (req: AuthRequest, res: Response, next: NextFunction) => {
   const role = req.user?.role?.toLowerCase();
   if (role === 'admin') return next();
   return res.status(403).json({ error: 'Insufficient permissions' });
+};
+
+const requireAdminOrBusiness = (req: AuthRequest, res: Response, next: NextFunction) => {
+  const role = req.user?.role?.toLowerCase();
+  if (role === 'admin' || role === 'business') return next();
+  return res.status(403).json({ error: 'Insufficient permissions' });
+};
+
+const getCurrentUser = async (req: AuthRequest): Promise<UserDoc | null> => {
+  return usersCollection().findOne({ _id: req.user!.id } as any);
+};
+
+const canNotifyRecipient = (role: string, currentUser: UserDoc, recipient: UserDoc): boolean => {
+  if (role === 'admin') return true;
+  if (role !== 'business') return false;
+
+  const currentKeys = [currentUser.businessId, currentUser._id].filter(Boolean).map(String);
+  const recipientKeys = [recipient.businessId, recipient.parentId, recipient.createdBy].filter(Boolean).map(String);
+
+  for (const key of currentKeys) {
+    if (recipientKeys.includes(key)) return true;
+  }
+  return false;
 };
 
 const toNotificationResponse = (n: NotificationDoc) => ({
@@ -77,7 +101,8 @@ const isValidNotificationType = (value: any): value is NotificationType => {
     'job_completed',
     'quotation_sent',
     'receipt_sent',
-    'followup_sent'
+    'followup_sent',
+    'order_status'
   ].includes(String(value));
 };
 
@@ -106,13 +131,21 @@ app.get('/notifications', authenticate, async (req: AuthRequest, res: Response) 
 app.post(
   '/notifications',
   authenticate,
-  requireAdmin,
+  requireAdminOrBusiness,
   [body('userId').isLength({ min: 1 }), body('title').isLength({ min: 1 }), body('message').isLength({ min: 1 })],
   async (req: AuthRequest, res: Response) => {
     const errors = validationResult(req);
     if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
 
+    const role = req.user!.role.toLowerCase();
+    const currentUser = await getCurrentUser(req);
+    if (!currentUser) return res.status(401).json({ error: 'User not found' });
+
     const payload = req.body as Partial<NotificationDoc> & { userId: string; title: string; message: string; type?: string };
+    const recipient = await usersCollection().findOne({ _id: payload.userId } as any);
+    if (!recipient) return res.status(404).json({ error: 'Recipient user not found' });
+    if (!canNotifyRecipient(role, currentUser, recipient)) return res.status(403).json({ error: 'Insufficient permissions' });
+
     const type = payload.type && isValidNotificationType(payload.type) ? (payload.type as NotificationType) : 'system';
 
     const notification: NotificationDoc = {
@@ -274,4 +307,3 @@ app.listen(PORT, '0.0.0.0', async () => {
   await mongo.connect();
   await eventBus.connect();
 });
-

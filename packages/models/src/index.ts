@@ -25,7 +25,8 @@ export type NotificationType =
   | 'job_completed'
   | 'quotation_sent'
   | 'receipt_sent'
-  | 'followup_sent';
+  | 'followup_sent'
+  | 'order_status';
 export type Model3DStatus = 'processing' | 'completed' | 'failed';
 export type BookingMode = 'automated' | 'manual';
 export type UnitSystem = 'inches' | 'centimeters';
