@@ -88,6 +88,28 @@ app.get('/health', (_req: Request, res: Response) => {
   res.json({ status: 'OK', service: 'api-gateway' });
 });
 
+app.post('/api/public-signup', express.json({ limit: '2mb' }), async (req: Request, res: Response) => {
+  try {
+    const correlationId = req.headers['x-correlation-id'];
+    const upstream = await fetch(`${USERS_SERVICE_URL.replace(/\/+$/, '')}/public-signup`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(correlationId && typeof correlationId === 'string' ? { 'x-correlation-id': correlationId } : {})
+      },
+      body: JSON.stringify(req.body || {})
+    });
+
+    const text = await upstream.text();
+    res.status(upstream.status);
+    const contentType = upstream.headers.get('content-type');
+    if (contentType) res.setHeader('content-type', contentType);
+    return res.send(text);
+  } catch (err: any) {
+    return res.status(502).json({ error: err?.message || 'Upstream error' });
+  }
+});
+
 app.use(createProxyMiddleware({
   target: AUTH_SERVICE_URL,
   changeOrigin: true,

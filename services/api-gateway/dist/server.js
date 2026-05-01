@@ -81,6 +81,28 @@ app.options('*', (0, cors_1.default)(corsOptions));
 app.get('/health', (_req, res) => {
     res.json({ status: 'OK', service: 'api-gateway' });
 });
+app.post('/api/public-signup', express_1.default.json({ limit: '2mb' }), async (req, res) => {
+    try {
+        const correlationId = req.headers['x-correlation-id'];
+        const upstream = await fetch(`${USERS_SERVICE_URL.replace(/\/+$/, '')}/public-signup`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                ...(correlationId && typeof correlationId === 'string' ? { 'x-correlation-id': correlationId } : {})
+            },
+            body: JSON.stringify(req.body || {})
+        });
+        const text = await upstream.text();
+        res.status(upstream.status);
+        const contentType = upstream.headers.get('content-type');
+        if (contentType)
+            res.setHeader('content-type', contentType);
+        return res.send(text);
+    }
+    catch (err) {
+        return res.status(502).json({ error: err?.message || 'Upstream error' });
+    }
+});
 app.use((0, http_proxy_middleware_1.createProxyMiddleware)({
     target: AUTH_SERVICE_URL,
     changeOrigin: true,
