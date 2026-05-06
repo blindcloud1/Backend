@@ -342,6 +342,10 @@ app.put('/businesses/:id/settings', authenticate, requireAdminOrBusiness, async 
         depositPercentage: typeof payload.depositPercentage === 'number' ? payload.depositPercentage : 30,
         quotationTemplates: Array.isArray(payload.quotationTemplates) ? payload.quotationTemplates : [],
         invoiceTemplates: Array.isArray(payload.invoiceTemplates) ? payload.invoiceTemplates : [],
+        allowCardPayment: Boolean((payload as any).allowCardPayment),
+        allowBankTransfer: Boolean((payload as any).allowBankTransfer),
+        showEmailHistory: Boolean((payload as any).showEmailHistory),
+        emailTemplates: (payload as any).emailTemplates,
         createdAt: now,
         updatedAt: now
       };

@@ -74,6 +74,7 @@ export type BusinessDoc = DbDocBase &
     vatNumber?: string;
     vatPercentage?: number;
     termsAndConditions?: string;
+    emailSettings?: Record<string, unknown>;
   };
 
 export type CustomerDoc = DbDocBase &
@@ -204,6 +205,10 @@ export type BusinessSettingsDoc = DbDocBase &
     depositPercentage: number;
     quotationTemplates: Record<string, unknown>[];
     invoiceTemplates: Record<string, unknown>[];
+    allowCardPayment?: boolean;
+    allowBankTransfer?: boolean;
+    showEmailHistory?: boolean;
+    emailTemplates?: Record<string, unknown>;
   };
 
 export type SubscriptionPlanDoc = DbDocBase &

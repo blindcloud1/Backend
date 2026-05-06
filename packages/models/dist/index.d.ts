@@ -48,6 +48,7 @@ export type BusinessDoc = DbDocBase & DbTimestamps & {
     vatNumber?: string;
     vatPercentage?: number;
     termsAndConditions?: string;
+    emailSettings?: Record<string, unknown>;
 };
 export type CustomerDoc = DbDocBase & DbTimestamps & {
     businessId: string;
@@ -163,6 +164,10 @@ export type BusinessSettingsDoc = DbDocBase & DbTimestamps & {
     depositPercentage: number;
     quotationTemplates: Record<string, unknown>[];
     invoiceTemplates: Record<string, unknown>[];
+    allowCardPayment?: boolean;
+    allowBankTransfer?: boolean;
+    showEmailHistory?: boolean;
+    emailTemplates?: Record<string, unknown>;
 };
 export type SubscriptionPlanDoc = DbDocBase & DbTimestamps & {
     name: string;
