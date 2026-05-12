@@ -44,6 +44,7 @@ const plansCollection = () => mongo.db('blindscloud').collection<SubscriptionPla
 const subsCollection = () => mongo.db('blindscloud').collection<UserSubscriptionDoc>('user_subscriptions');
 const paymentsCollection = () => mongo.db('blindscloud').collection<PaymentHistoryDoc>('payment_history');
 const customConfigCollection = () => mongo.db('blindscloud').collection<CustomPlanConfigDoc>('custom_plan_config');
+const platformSettingsCollection = () => mongo.db('blindscloud').collection<any>('platform_settings');
 
 const authenticate = (req: AuthRequest, res: Response, next: NextFunction) => {
   const header = req.header('authorization') || req.header('Authorization');
@@ -124,6 +125,45 @@ app.get('/health', async (_req: Request, res: Response) => {
     res.status(500).json({ status: 'ERROR', error: err?.message || String(err) });
   }
 });
+
+app.get('/terms-and-conditions', authenticate, async (_req: AuthRequest, res: Response) => {
+  const doc = await platformSettingsCollection().findOne({ _id: 'subscription_terms' } as any);
+  res.json({
+    terms: typeof doc?.terms === 'string' ? doc.terms : '',
+    updatedAt: doc?.updatedAt?.toISOString?.() || null
+  });
+});
+
+app.put(
+  '/terms-and-conditions',
+  authenticate,
+  requireAdmin,
+  [body('terms').isString().isLength({ max: 1000 })],
+  async (req: AuthRequest, res: Response) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+
+    const terms = String((req.body as any)?.terms || '');
+    const now = new Date();
+
+    await platformSettingsCollection().updateOne(
+      { _id: 'subscription_terms' } as any,
+      {
+        $set: {
+          terms,
+          updatedAt: now,
+          updatedBy: req.user?.id || null
+        },
+        $setOnInsert: {
+          createdAt: now
+        }
+      } as any,
+      { upsert: true }
+    );
+
+    res.json({ terms, updatedAt: now.toISOString() });
+  }
+);
 
 app.get('/subscription-plans', authenticate, async (req: AuthRequest, res: Response) => {
   const role = req.user!.role.toLowerCase();
