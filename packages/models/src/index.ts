@@ -216,6 +216,7 @@ export type SubscriptionPlanDoc = DbDocBase &
     name: string;
     description: string;
     price: number;
+    setupFee?: number | null;
     features: string[];
     maxEmployees: number | null;
     maxSubBusinessUsers?: number | null;
@@ -238,6 +239,8 @@ export type UserSubscriptionDoc = DbDocBase &
     cancelAtPeriodEnd: boolean;
     grantedByAdmin: boolean;
     grantedBy?: string;
+    setupFeeCharged?: boolean;
+    setupFeeAmount?: number;
   };
 
 export type PaymentHistoryDoc = DbDocBase & {

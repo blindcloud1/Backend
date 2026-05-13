@@ -170,14 +170,27 @@ app.get('/subscription-plans', authenticate, async (req: AuthRequest, res: Respo
   const includeInactive = req.query.includeInactive === 'true';
   const filter: any = includeInactive && role === 'admin' ? {} : { active: true };
   const plans = await plansCollection().find(filter).sort({ price: 1 }).toArray();
-  res.json(plans.map(toPlanResponse));
+  if (role === 'admin') {
+    res.json(plans.map(toPlanResponse));
+    return;
+  }
+
+  const existingCount = await subsCollection().countDocuments({ userId: req.user!.id } as any);
+  const isFirstPurchase = existingCount === 0;
+
+  res.json(
+    plans.map(p => ({
+      ...toPlanResponse(p),
+      setupFeeApplies: isFirstPurchase && Number(toNullableNumberOrDefault(p.setupFee, 0) || 0) > 0
+    }))
+  );
 });
 
 app.post(
   '/subscription-plans',
   authenticate,
   requireAdmin,
-  [body('name').isLength({ min: 1 }), body('price').isNumeric()],
+  [body('name').isLength({ min: 1 }), body('price').isNumeric(), body('setupFee').optional().isNumeric()],
   async (req: AuthRequest, res: Response) => {
     const errors = validationResult(req);
     if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
@@ -189,6 +202,7 @@ app.post(
       name: String(payload.name || ''),
       description: String(payload.description || ''),
       price: typeof payload.price === 'number' ? payload.price : Number(payload.price),
+      setupFee: toNullableNumberOrDefault(payload.setupFee, null),
       features: Array.isArray(payload.features) ? payload.features : [],
       maxEmployees: toNullableNumberOrDefault(payload.maxEmployees, 0),
       maxSubBusinessUsers: toNullableNumberOrDefault(payload.maxSubBusinessUsers, null),
@@ -229,6 +243,9 @@ app.put('/subscription-plans/:id', authenticate, requireAdmin, [param('id').isLe
   const updates = req.body as Partial<SubscriptionPlanDoc>;
   delete (updates as any)._id;
   delete (updates as any).createdAt;
+  if ((updates as any).setupFee !== undefined) {
+    updates.setupFee = toNullableNumberOrDefault((updates as any).setupFee, null);
+  }
   updates.updatedAt = new Date();
 
   const result = await plansCollection().updateOne({ _id: planId } as any, { $set: updates } as any);
@@ -277,6 +294,20 @@ app.delete('/subscription-plans/:id', authenticate, requireAdmin, [param('id').i
 app.get('/subscriptions/me', authenticate, async (req: AuthRequest, res: Response) => {
   const sub = await subsCollection().findOne({ userId: req.user!.id } as any, { sort: { currentPeriodEnd: -1 } } as any);
   if (!sub) return res.json(null);
+
+  const now = Date.now();
+  const endMs = sub.currentPeriodEnd?.getTime?.() ?? Date.parse(String((sub as any).currentPeriodEnd || ''));
+  const shouldExpire = sub.status === 'active' && Number.isFinite(endMs) && endMs < now;
+
+  if (shouldExpire) {
+    await subsCollection().updateOne(
+      { _id: sub._id } as any,
+      { $set: { status: 'expired', updatedAt: new Date() } } as any
+    );
+    const updated = await subsCollection().findOne({ _id: sub._id } as any);
+    if (updated) return res.json(toSubResponse(updated));
+  }
+
   res.json(toSubResponse(sub));
 });
 
@@ -327,6 +358,8 @@ app.post(
           cancelAtPeriodEnd: false,
           grantedByAdmin: true,
           grantedBy: req.user!.id,
+          setupFeeCharged: false,
+          setupFeeAmount: 0,
           updatedAt: now
         }
       : {
@@ -341,6 +374,8 @@ app.post(
           cancelAtPeriodEnd: false,
           grantedByAdmin: true,
           grantedBy: req.user!.id,
+          setupFeeCharged: false,
+          setupFeeAmount: 0,
           createdAt: now,
           updatedAt: now
         };
@@ -381,6 +416,11 @@ app.post(
     const plan = await plansCollection().findOne({ _id: planId, active: true } as any);
     if (!plan) return res.status(400).json({ error: 'Invalid planId' });
 
+    const existingCount = await subsCollection().countDocuments({ userId: req.user!.id } as any);
+    const isFirstPurchase = existingCount === 0;
+    const planSetupFee = Number(toNullableNumberOrDefault(plan.setupFee, 0) || 0);
+    const shouldChargeSetupFee = isFirstPurchase && planSetupFee > 0;
+
     const now = new Date();
     const end = new Date(now);
     end.setMonth(end.getMonth() + 1);
@@ -397,6 +437,8 @@ app.post(
       cancelAtPeriodEnd: false,
       grantedByAdmin: false,
       grantedBy: undefined,
+      setupFeeCharged: shouldChargeSetupFee,
+      setupFeeAmount: shouldChargeSetupFee ? planSetupFee : 0,
       createdAt: now,
       updatedAt: now
     };
@@ -428,7 +470,11 @@ app.post('/subscriptions/:id/cancel', authenticate, [param('id').isLength({ min:
   if (!existing) return res.status(404).json({ error: 'Subscription not found' });
   if (role !== 'admin' && existing.userId !== req.user!.id) return res.status(403).json({ error: 'Insufficient permissions' });
 
-  const updates: Partial<UserSubscriptionDoc> = { cancelAtPeriodEnd: true, updatedAt: new Date() };
+  const now = new Date();
+  const updates: Partial<UserSubscriptionDoc> =
+    role === 'admin'
+      ? { status: 'cancelled', cancelAtPeriodEnd: false, currentPeriodEnd: now, updatedAt: now }
+      : { cancelAtPeriodEnd: true, updatedAt: now };
   const result = await subsCollection().updateOne({ _id: id } as any, { $set: updates } as any);
   if (result.matchedCount === 0) return res.status(404).json({ error: 'Subscription not found' });
   const updated = await subsCollection().findOne({ _id: id } as any);
