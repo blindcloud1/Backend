@@ -170,18 +170,26 @@ app.get('/subscription-plans', authenticate, async (req: AuthRequest, res: Respo
   const includeInactive = req.query.includeInactive === 'true';
   const filter: any = includeInactive && role === 'admin' ? {} : { active: true };
   const plans = await plansCollection().find(filter).sort({ price: 1 }).toArray();
+
+  const cfg = await customConfigCollection().findOne({} as any);
+  const setupFeeEnabled = cfg?.setupFeeEnabled !== false;
+
   if (role === 'admin') {
-    res.json(plans.map(toPlanResponse));
+    res.json(plans.map(p => ({ ...toPlanResponse(p), setupFeeEnabled })));
     return;
   }
 
-  const existingCount = await subsCollection().countDocuments({ userId: req.user!.id } as any);
-  const isFirstPurchase = existingCount === 0;
+  const hasPaidSetupFeeCount = await subsCollection().countDocuments(
+    { userId: req.user!.id, setupFeeCharged: true } as any
+  );
+  const canChargeSetupFee = hasPaidSetupFeeCount === 0;
 
   res.json(
     plans.map(p => ({
       ...toPlanResponse(p),
-      setupFeeApplies: isFirstPurchase && Number(toNullableNumberOrDefault(p.setupFee, 0) || 0) > 0
+      setupFeeEnabled,
+      setupFeeApplies:
+        setupFeeEnabled && canChargeSetupFee && Number(toNullableNumberOrDefault(p.setupFee, 0) || 0) > 0
     }))
   );
 });
@@ -416,10 +424,15 @@ app.post(
     const plan = await plansCollection().findOne({ _id: planId, active: true } as any);
     if (!plan) return res.status(400).json({ error: 'Invalid planId' });
 
-    const existingCount = await subsCollection().countDocuments({ userId: req.user!.id } as any);
-    const isFirstPurchase = existingCount === 0;
+    const cfg = await customConfigCollection().findOne({} as any);
+    const setupFeeEnabled = cfg?.setupFeeEnabled !== false;
+
+    const hasPaidSetupFeeCount = await subsCollection().countDocuments(
+      { userId: req.user!.id, setupFeeCharged: true } as any
+    );
+    const canChargeSetupFee = hasPaidSetupFeeCount === 0;
     const planSetupFee = Number(toNullableNumberOrDefault(plan.setupFee, 0) || 0);
-    const shouldChargeSetupFee = isFirstPurchase && planSetupFee > 0;
+    const shouldChargeSetupFee = setupFeeEnabled && canChargeSetupFee && planSetupFee > 0;
 
     const now = new Date();
     const end = new Date(now);
@@ -566,7 +579,8 @@ app.put(
     body('emailPrice').optional().isNumeric(),
     body('userPrice').optional().isNumeric(),
     body('storagePrice').optional().isNumeric(),
-    body('bannerDaysBeforeExpiry').optional().isInt({ min: 0 })
+    body('bannerDaysBeforeExpiry').optional().isInt({ min: 0 }),
+    body('setupFeeEnabled').optional().isBoolean()
   ],
   async (req: AuthRequest, res: Response) => {
     const errors = validationResult(req);
@@ -577,7 +591,7 @@ app.put(
     const existing = await customConfigCollection().findOne({} as any);
 
     const base: CustomPlanConfigDoc = existing
-      ? { ...existing, ...payload, updatedAt: now }
+      ? { ...existing, ...payload, setupFeeEnabled: payload.setupFeeEnabled ?? existing.setupFeeEnabled ?? true, updatedAt: now }
       : {
           _id: crypto.randomUUID(),
           jobPrice: typeof payload.jobPrice === 'number' ? payload.jobPrice : 0,
@@ -587,6 +601,7 @@ app.put(
           storagePrice: typeof payload.storagePrice === 'number' ? payload.storagePrice : 0,
           bannerDaysBeforeExpiry:
             typeof payload.bannerDaysBeforeExpiry === 'number' ? payload.bannerDaysBeforeExpiry : null,
+          setupFeeEnabled: payload.setupFeeEnabled ?? true,
           createdAt: now,
           updatedAt: now
         };

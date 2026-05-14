@@ -311,6 +311,7 @@ export type CustomPlanConfigDoc = DbDocBase &
     userPrice: number;
     storagePrice: number;
     bannerDaysBeforeExpiry?: number | null;
+    setupFeeEnabled?: boolean;
   };
 
 export type FileDoc = DbDocBase & {
