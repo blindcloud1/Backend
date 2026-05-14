@@ -356,6 +356,15 @@ app.post(
       { sort: { currentPeriodEnd: -1 } } as any
     );
 
+    const existingEndMs = existingSub?.currentPeriodEnd?.getTime?.() ?? NaN;
+    const remainingMs =
+      existingSub && existingSub.status === 'active' && Number.isFinite(existingEndMs) && existingEndMs > now.getTime()
+        ? existingEndMs - now.getTime()
+        : 0;
+    if (remainingMs > 0) {
+      end.setTime(end.getTime() + remainingMs);
+    }
+
     const subscription: UserSubscriptionDoc = existingSub
       ? {
           ...existingSub,
@@ -435,8 +444,31 @@ app.post(
     const shouldChargeSetupFee = setupFeeEnabled && canChargeSetupFee && planSetupFee > 0;
 
     const now = new Date();
+    const activeStatuses: SubscriptionStatus[] = ['active', 'trial', 'past_due'];
+    const activeSubs = await subsCollection()
+      .find({ userId: req.user!.id, status: { $in: activeStatuses } } as any)
+      .sort({ currentPeriodEnd: -1 } as any)
+      .toArray();
+
+    const currentActive = activeSubs[0] || null;
+    const currentActiveEndMs = currentActive?.currentPeriodEnd?.getTime?.() ?? NaN;
+    const remainingMs =
+      currentActive && Number.isFinite(currentActiveEndMs) && currentActiveEndMs > now.getTime()
+        ? currentActiveEndMs - now.getTime()
+        : 0;
+
+    if (activeSubs.length > 0) {
+      await subsCollection().updateMany(
+        { userId: req.user!.id, status: { $in: activeStatuses } } as any,
+        { $set: { status: 'cancelled', cancelAtPeriodEnd: false, currentPeriodEnd: now, updatedAt: now } } as any
+      );
+    }
+
     const end = new Date(now);
     end.setMonth(end.getMonth() + 1);
+    if (remainingMs > 0) {
+      end.setTime(end.getTime() + remainingMs);
+    }
 
     const subscription: UserSubscriptionDoc = {
       _id: crypto.randomUUID(),
