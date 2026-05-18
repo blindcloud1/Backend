@@ -216,6 +216,8 @@ export type SubscriptionPlanDoc = DbDocBase &
     name: string;
     description: string;
     price: number;
+    priceOneMonth?: number | null;
+    priceYearly?: number | null;
     setupFee?: number | null;
     features: string[];
     maxEmployees: number | null;
@@ -224,6 +226,7 @@ export type SubscriptionPlanDoc = DbDocBase &
     maxEmailsPerMonth?: number | null;
     maxJobs: number | null;
     stripePriceId?: string | null;
+    stripePriceIdYearly?: string | null;
     active: boolean;
   };
 
@@ -241,6 +244,7 @@ export type UserSubscriptionDoc = DbDocBase &
     grantedBy?: string;
     setupFeeCharged?: boolean;
     setupFeeAmount?: number;
+    billingCycle?: 'one_month' | 'monthly' | 'yearly';
   };
 
 export type PaymentHistoryDoc = DbDocBase & {

@@ -5,6 +5,7 @@ import { body, param, validationResult } from 'express-validator';
 import jwt from 'jsonwebtoken';
 import { MongoClient } from 'mongodb';
 import crypto from 'crypto';
+import Stripe from 'stripe';
 import { EventBus, type CloudEvent } from '@blindscloud/event-bus';
 import type {
   CustomPlanConfigDoc,
@@ -24,10 +25,15 @@ const JWT_SECRET = process.env.JWT_SECRET || '';
 const MONGO_URL = process.env.MONGO_URL || '';
 const RABBITMQ_URL = process.env.RABBITMQ_URL || '';
 const EVENT_EXCHANGE = process.env.EVENT_EXCHANGE || 'blindscloud.events';
+const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY || '';
+const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET || '';
+const FRONTEND_URL = process.env.FRONTEND_URL || '';
 
 if (!JWT_SECRET) throw new Error('JWT_SECRET is required');
 if (!MONGO_URL) throw new Error('MONGO_URL is required');
 if (!RABBITMQ_URL) throw new Error('RABBITMQ_URL is required');
+
+const stripe = STRIPE_SECRET_KEY ? new Stripe(STRIPE_SECRET_KEY, { apiVersion: '2024-06-20' }) : null;
 
 type AuthUser = { id: string; email: string; role: UserRole | string };
 type AuthRequest = Request & { user?: AuthUser };
@@ -114,7 +120,14 @@ const toNullableNumberOrDefault = (value: any, defaultValue: number | null): num
 };
 
 const app = express();
-app.use(express.json({ limit: '2mb' }));
+app.use(
+  express.json({
+    limit: '2mb',
+    verify: (req: any, _res, buf) => {
+      req.rawBody = buf;
+    }
+  })
+);
 app.use(helmet());
 
 app.get('/health', async (_req: Request, res: Response) => {
@@ -124,6 +137,14 @@ app.get('/health', async (_req: Request, res: Response) => {
   } catch (err: any) {
     res.status(500).json({ status: 'ERROR', error: err?.message || String(err) });
   }
+});
+
+app.get('/public/terms-and-conditions', async (_req: Request, res: Response) => {
+  const doc = await platformSettingsCollection().findOne({ _id: 'subscription_terms' } as any);
+  res.json({
+    terms: typeof doc?.terms === 'string' ? doc.terms : '',
+    updatedAt: doc?.updatedAt?.toISOString?.() || null
+  });
 });
 
 app.get('/terms-and-conditions', authenticate, async (_req: AuthRequest, res: Response) => {
@@ -198,7 +219,14 @@ app.post(
   '/subscription-plans',
   authenticate,
   requireAdmin,
-  [body('name').isLength({ min: 1 }), body('price').isNumeric(), body('setupFee').optional().isNumeric()],
+  [
+    body('name').isLength({ min: 1 }),
+    body('price').isNumeric(),
+    body('priceOneMonth').optional().isNumeric(),
+    body('priceYearly').optional().isNumeric(),
+    body('setupFee').optional().isNumeric(),
+    body('stripePriceIdYearly').optional().isString()
+  ],
   async (req: AuthRequest, res: Response) => {
     const errors = validationResult(req);
     if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
@@ -210,6 +238,8 @@ app.post(
       name: String(payload.name || ''),
       description: String(payload.description || ''),
       price: typeof payload.price === 'number' ? payload.price : Number(payload.price),
+      priceOneMonth: toNullableNumberOrDefault((payload as any).priceOneMonth, null),
+      priceYearly: toNullableNumberOrDefault((payload as any).priceYearly, null),
       setupFee: toNullableNumberOrDefault(payload.setupFee, null),
       features: Array.isArray(payload.features) ? payload.features : [],
       maxEmployees: toNullableNumberOrDefault(payload.maxEmployees, 0),
@@ -218,6 +248,7 @@ app.post(
       maxEmailsPerMonth: toNullableNumberOrDefault(payload.maxEmailsPerMonth, null),
       maxJobs: toNullableNumberOrDefault(payload.maxJobs, 0),
       stripePriceId: payload.stripePriceId ?? null,
+      stripePriceIdYearly: (payload as any).stripePriceIdYearly ?? null,
       active: payload.active ?? true,
       createdAt: now,
       updatedAt: now
@@ -253,6 +284,12 @@ app.put('/subscription-plans/:id', authenticate, requireAdmin, [param('id').isLe
   delete (updates as any).createdAt;
   if ((updates as any).setupFee !== undefined) {
     updates.setupFee = toNullableNumberOrDefault((updates as any).setupFee, null);
+  }
+  if ((updates as any).priceOneMonth !== undefined) {
+    updates.priceOneMonth = toNullableNumberOrDefault((updates as any).priceOneMonth, null);
+  }
+  if ((updates as any).priceYearly !== undefined) {
+    updates.priceYearly = toNullableNumberOrDefault((updates as any).priceYearly, null);
   }
   updates.updatedAt = new Date();
 
@@ -297,6 +334,311 @@ app.delete('/subscription-plans/:id', authenticate, requireAdmin, [param('id').i
   await eventBus.publish('subscriptionPlans.deleted', event);
 
   res.json({ status: 'OK' });
+});
+
+const getFrontendBaseUrl = (req: Request): string => {
+  if (FRONTEND_URL) return FRONTEND_URL.replace(/\/+$/, '');
+  const origin = req.header('origin') || '';
+  if (origin) return origin.replace(/\/+$/, '');
+  const host = req.header('host') || '';
+  if (!host) return '';
+  const proto = req.header('x-forwarded-proto') || 'https';
+  return `${proto}://${host}`.replace(/\/+$/, '');
+};
+
+app.post(
+  '/stripe/checkout-session',
+  authenticate,
+  [body('planId').isLength({ min: 1 }), body('billingCycle').optional().isString()],
+  async (req: AuthRequest, res: Response) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+  if (!stripe) return res.status(501).json({ error: 'Stripe is not configured' });
+
+  const currentUser = await getCurrentUser(req);
+  if (!currentUser) return res.status(401).json({ error: 'User not found' });
+
+  const { planId, billingCycle } = req.body as { planId: string; billingCycle?: string };
+  const normalizedCycle =
+    billingCycle === 'one_month' || billingCycle === 'yearly' || billingCycle === 'monthly'
+      ? billingCycle
+      : 'monthly';
+  const plan = await plansCollection().findOne({ _id: String(planId), active: true } as any);
+  if (!plan) return res.status(400).json({ error: 'Invalid planId' });
+  if (normalizedCycle === 'monthly' && !plan.stripePriceId) {
+    return res.status(400).json({ error: 'Plan is missing stripePriceId (monthly)' });
+  }
+  if (normalizedCycle === 'yearly' && !(plan as any).stripePriceIdYearly) {
+    return res.status(400).json({ error: 'Plan is missing stripePriceIdYearly (yearly)' });
+  }
+
+  const cfg = await customConfigCollection().findOne({} as any);
+  const setupFeeEnabled = cfg?.setupFeeEnabled !== false;
+  const hasPaidSetupFeeCount = await subsCollection().countDocuments(
+    { userId: req.user!.id, setupFeeCharged: true } as any
+  );
+  const canChargeSetupFee = hasPaidSetupFeeCount === 0;
+  const planSetupFee = Number(toNullableNumberOrDefault((plan as any).setupFee, 0) || 0);
+  const shouldChargeSetupFee = setupFeeEnabled && canChargeSetupFee && planSetupFee > 0;
+
+  const existingCustomer = await subsCollection().findOne(
+    { userId: req.user!.id, stripeCustomerId: { $exists: true, $ne: null } } as any,
+    { sort: { createdAt: -1 } } as any
+  );
+  const stripeCustomerId =
+    typeof existingCustomer?.stripeCustomerId === 'string' && existingCustomer.stripeCustomerId.length > 0
+      ? existingCustomer.stripeCustomerId
+      : (await stripe.customers.create({ email: currentUser.email, metadata: { userId: currentUser._id } })).id;
+
+  const frontendBase = getFrontendBaseUrl(req);
+  const termsUrl = `${frontendBase}/terms-and-conditions`;
+  const successUrl = `${frontendBase}/`;
+  const cancelUrl = `${frontendBase}/`;
+
+  const commonMetadata = {
+    userId: req.user!.id,
+    planId: String(planId),
+    billingCycle: normalizedCycle,
+    setupFeeCharged: shouldChargeSetupFee ? 'true' : 'false',
+    setupFeeAmount: shouldChargeSetupFee ? String(planSetupFee) : '0',
+    termsUrl
+  };
+
+  const session =
+    normalizedCycle === 'one_month'
+      ? await stripe.checkout.sessions.create({
+          customer: stripeCustomerId,
+          mode: 'payment',
+          line_items: [
+            {
+              price_data: {
+                currency: 'gbp',
+                unit_amount: Math.round(
+                  Number(
+                    toNullableNumberOrDefault((plan as any).priceOneMonth ?? (plan as any).price, 0) || 0
+                  ) * 100
+                ),
+                product_data: { name: `${plan.name} (one-month)` }
+              },
+              quantity: 1
+            },
+            ...(shouldChargeSetupFee
+              ? [
+                  {
+                    price_data: {
+                      currency: 'gbp',
+                      unit_amount: Math.round(planSetupFee * 100),
+                      product_data: { name: `${plan.name} setup fee` }
+                    },
+                    quantity: 1
+                  }
+                ]
+              : [])
+          ],
+          allow_promotion_codes: true,
+          success_url: successUrl,
+          cancel_url: cancelUrl,
+          metadata: commonMetadata
+        })
+      : await stripe.checkout.sessions.create({
+          customer: stripeCustomerId,
+          mode: 'subscription',
+          line_items: [
+            {
+              price: normalizedCycle === 'yearly' ? (plan as any).stripePriceIdYearly : plan.stripePriceId!,
+              quantity: 1
+            },
+            ...(shouldChargeSetupFee
+              ? [
+                  {
+                    price_data: {
+                      currency: 'gbp',
+                      unit_amount: Math.round(planSetupFee * 100),
+                      product_data: { name: `${plan.name} setup fee` }
+                    },
+                    quantity: 1
+                  }
+                ]
+              : [])
+          ],
+          allow_promotion_codes: true,
+          success_url: successUrl,
+          cancel_url: cancelUrl,
+          metadata: commonMetadata,
+          subscription_data: {
+            metadata: {
+              userId: req.user!.id,
+              planId: String(planId),
+              billingCycle: normalizedCycle
+            }
+          }
+        });
+
+  res.json({ url: session.url });
+  }
+);
+
+app.post('/stripe/webhook', async (req: any, res: Response) => {
+  if (!stripe || !STRIPE_WEBHOOK_SECRET) {
+    return res.status(500).send('Stripe webhook not configured');
+  }
+
+  const sig = req.header('stripe-signature');
+  if (!sig) return res.status(400).send('Missing stripe-signature');
+
+  let event: Stripe.Event;
+  try {
+    event = stripe.webhooks.constructEvent(req.rawBody, sig, STRIPE_WEBHOOK_SECRET);
+  } catch (err: any) {
+    return res.status(400).send(`Webhook Error: ${err?.message || String(err)}`);
+  }
+
+  if (event.type !== 'checkout.session.completed') {
+    return res.json({ received: true });
+  }
+
+  const session = event.data.object as Stripe.Checkout.Session;
+  const userId = String((session.metadata || {}).userId || '');
+  const planId = String((session.metadata || {}).planId || '');
+  const billingCycleRaw = String((session.metadata || {}).billingCycle || '');
+  const billingCycle =
+    billingCycleRaw === 'one_month' || billingCycleRaw === 'yearly' || billingCycleRaw === 'monthly'
+      ? billingCycleRaw
+      : 'monthly';
+  const setupFeeCharged = String((session.metadata || {}).setupFeeCharged || '').toLowerCase() === 'true';
+  const setupFeeAmount = Number((session.metadata || {}).setupFeeAmount || 0) || 0;
+  const termsUrl = String((session.metadata || {}).termsUrl || '');
+
+  if (!userId || !planId) return res.json({ received: true });
+  const stripeSubscriptionId = typeof session.subscription === 'string' ? session.subscription : null;
+  if (stripeSubscriptionId) {
+    const existing = await subsCollection().findOne({ stripeSubscriptionId } as any);
+    if (existing) return res.json({ received: true });
+  }
+
+  const plan = await plansCollection().findOne({ _id: planId } as any);
+  const user = await usersCollection().findOne({ _id: userId } as any);
+  if (!plan || !user) return res.json({ received: true });
+
+  const nowMs = Date.now();
+  const activeStatuses: SubscriptionStatus[] = ['active', 'trial', 'past_due'];
+  const activeSubs = await subsCollection()
+    .find({ userId, status: { $in: activeStatuses } } as any)
+    .sort({ currentPeriodEnd: -1 } as any)
+    .toArray();
+
+  const currentActive = activeSubs[0] || null;
+  const currentActiveEndMs = currentActive?.currentPeriodEnd?.getTime?.() ?? NaN;
+  const remainingMs =
+    currentActive && Number.isFinite(currentActiveEndMs) && currentActiveEndMs > nowMs ? currentActiveEndMs - nowMs : 0;
+
+  if (activeSubs.length > 0) {
+    await subsCollection().updateMany(
+      { userId, status: { $in: activeStatuses } } as any,
+      { $set: { status: 'cancelled', cancelAtPeriodEnd: false, currentPeriodEnd: new Date(), updatedAt: new Date() } } as any
+    );
+  }
+
+  const stripeSub = stripeSubscriptionId ? await stripe.subscriptions.retrieve(stripeSubscriptionId) : null;
+  const stripeStartMs =
+    stripeSub?.current_period_start ? stripeSub.current_period_start * 1000 : nowMs;
+  const stripeEndMs =
+    stripeSub?.current_period_end ? stripeSub.current_period_end * 1000 : nowMs;
+
+  const startDate = new Date(stripeStartMs);
+  const endDate =
+    billingCycle === 'one_month' && !stripeSub
+      ? (() => {
+          const d = new Date(startDate);
+          d.setMonth(d.getMonth() + 1);
+          if (remainingMs > 0) d.setTime(d.getTime() + remainingMs);
+          return d;
+        })()
+      : new Date(stripeEndMs + remainingMs);
+
+  const mappedStatus: SubscriptionStatus = stripeSub?.status === 'trialing'
+    ? 'trial'
+    : stripeSub?.status === 'past_due'
+    ? 'past_due'
+    : stripeSub?.status === 'active'
+    ? 'active'
+    : 'active';
+
+  const now = new Date();
+  const subscription: UserSubscriptionDoc = {
+    _id: crypto.randomUUID(),
+    userId,
+    planId,
+    status: mappedStatus,
+    stripeCustomerId: stripeSub && typeof stripeSub.customer === 'string' ? stripeSub.customer : undefined,
+    stripeSubscriptionId: stripeSub?.id,
+    currentPeriodStart: startDate,
+    currentPeriodEnd: endDate,
+    cancelAtPeriodEnd: false,
+    grantedByAdmin: false,
+    grantedBy: undefined,
+    setupFeeCharged,
+    setupFeeAmount,
+    billingCycle,
+    createdAt: now,
+    updatedAt: now
+  };
+
+  await subsCollection().insertOne(subscription as any);
+
+  const amountTotal = typeof session.amount_total === 'number' ? session.amount_total : null;
+  const currency = typeof session.currency === 'string' ? session.currency.toUpperCase() : 'GBP';
+  if (amountTotal !== null) {
+    const payment: PaymentHistoryDoc = {
+      _id: crypto.randomUUID(),
+      userId,
+      subscriptionId: subscription._id,
+      amount: amountTotal / 100,
+      currency,
+      stripePaymentIntentId: typeof session.payment_intent === 'string' ? session.payment_intent : undefined,
+      stripeInvoiceId: undefined,
+      status: 'succeeded',
+      paymentDate: new Date(),
+      createdAt: new Date()
+    };
+    await paymentsCollection().insertOne(payment as any);
+  }
+
+  const frontendBase = getFrontendBaseUrl(req);
+  const finalTermsUrl = termsUrl || `${frontendBase}/terms-and-conditions`;
+  const planPrice = typeof (plan as any).price === 'number' ? (plan as any).price : Number((plan as any).price || 0);
+
+  const emailEvent: CloudEvent<{
+    userId: string;
+    planName: string;
+    planPrice: number;
+    billingCycle: 'one_month' | 'monthly' | 'yearly';
+    setupFeeAmount: number;
+    setupFeeCharged: boolean;
+    periodStart: string;
+    periodEnd: string;
+    termsUrl: string;
+  }> = {
+    id: crypto.randomUUID(),
+    type: 'subscriptions.paid',
+    version: 1,
+    source: 'billing-service',
+    occurredAt: new Date().toISOString(),
+    payload: {
+      userId,
+      planName: String((plan as any).name || ''),
+      planPrice,
+      billingCycle,
+      setupFeeAmount,
+      setupFeeCharged,
+      periodStart: startDate.toISOString(),
+      periodEnd: endDate.toISOString(),
+      termsUrl: finalTermsUrl
+    }
+  };
+  await eventBus.publish('subscriptions.paid', emailEvent);
+
+  return res.json({ received: true });
 });
 
 app.get('/subscriptions/me', authenticate, async (req: AuthRequest, res: Response) => {
