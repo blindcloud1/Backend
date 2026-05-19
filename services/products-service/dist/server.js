@@ -31,6 +31,8 @@ const eventBus = new event_bus_1.EventBus({
 });
 const productsCollection = () => mongo.db('blindscloud').collection('products');
 const usersCollection = () => mongo.db('blindscloud').collection('users');
+const plansCollection = () => mongo.db('blindscloud').collection('subscription_plans');
+const subsCollection = () => mongo.db('blindscloud').collection('user_subscriptions');
 const authenticate = (req, res, next) => {
     const header = req.header('authorization') || req.header('Authorization');
     if (!header)
@@ -74,6 +76,25 @@ const toProductResponse = (p) => ({
     createdAt: p.createdAt.toISOString(),
     updatedAt: p.updatedAt?.toISOString()
 });
+const getActiveSubscriptionForBusiness = async (businessId) => {
+    if (!businessId)
+        return null;
+    const businessUsers = await usersCollection()
+        .find({ businessId, role: 'business' })
+        .project({ _id: 1 })
+        .toArray();
+    const ids = businessUsers.map((u) => u._id).filter((id) => typeof id === 'string' && id.length > 0);
+    if (ids.length === 0)
+        return null;
+    const activeStatuses = ['active', 'trial', 'past_due'];
+    const subscription = await subsCollection().findOne({ userId: { $in: ids }, status: { $in: activeStatuses } }, { sort: { currentPeriodEnd: -1 } });
+    if (!subscription)
+        return null;
+    const plan = await plansCollection().findOne({ _id: String(subscription.planId || '') });
+    if (!plan)
+        return null;
+    return { subscription, plan };
+};
 const app = (0, express_1.default)();
 app.use(express_1.default.json({ limit: '2mb' }));
 app.use((0, helmet_1.default)());
@@ -124,11 +145,29 @@ app.post('/products', authenticate, requireAdminOrBusiness, [
     if (!currentUser)
         return res.status(401).json({ error: 'User not found' });
     const payload = req.body;
-    const businessId = role === 'admin' ? (payload.businessId ? String(payload.businessId) : undefined) : String(currentUser.businessId || '');
-    if (role !== 'admin' && !businessId)
+    const businessId = role === 'admin' ? String(payload.businessId || '') : String(currentUser.businessId || '');
+    if (!businessId)
         return res.status(400).json({ error: 'businessId is required' });
     if (!canAccessBusiness(role, currentUser, businessId))
         return res.status(403).json({ error: 'Insufficient permissions' });
+    if (role !== 'admin') {
+        const current = await getActiveSubscriptionForBusiness(businessId);
+        if (!current) {
+            return res.status(403).json({ error: 'No active subscription. Please subscribe to create products.' });
+        }
+        const maxProducts = current.plan.maxProducts;
+        if (maxProducts !== null && maxProducts !== undefined) {
+            const allowed = typeof maxProducts === 'number' ? maxProducts : Number(maxProducts);
+            if (Number.isFinite(allowed)) {
+                const used = await productsCollection().countDocuments({ businessId });
+                if (used >= allowed) {
+                    return res.status(403).json({
+                        error: `Product limit reached. Your plan allows ${Math.floor(allowed)} products. You have used ${used}.`
+                    });
+                }
+            }
+        }
+    }
     const now = new Date();
     const product = {
         _id: crypto_1.default.randomUUID(),

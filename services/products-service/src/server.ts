@@ -6,7 +6,7 @@ import jwt from 'jsonwebtoken';
 import { MongoClient } from 'mongodb';
 import crypto from 'crypto';
 import { EventBus, type CloudEvent } from '@blindscloud/event-bus';
-import type { ProductDoc, UserDoc, UserRole } from '@blindscloud/models';
+import type { ProductDoc, SubscriptionPlanDoc, UserDoc, UserRole, UserSubscriptionDoc } from '@blindscloud/models';
 
 dotenv.config();
 
@@ -32,6 +32,8 @@ const eventBus = new EventBus({
 
 const productsCollection = () => mongo.db('blindscloud').collection<ProductDoc>('products');
 const usersCollection = () => mongo.db('blindscloud').collection<UserDoc>('users');
+const plansCollection = () => mongo.db('blindscloud').collection<SubscriptionPlanDoc>('subscription_plans');
+const subsCollection = () => mongo.db('blindscloud').collection<UserSubscriptionDoc>('user_subscriptions');
 
 const authenticate = (req: AuthRequest, res: Response, next: NextFunction) => {
   const header = req.header('authorization') || req.header('Authorization');
@@ -76,6 +78,31 @@ const toProductResponse = (p: ProductDoc) => ({
   createdAt: p.createdAt.toISOString(),
   updatedAt: p.updatedAt?.toISOString()
 });
+
+const getActiveSubscriptionForBusiness = async (
+  businessId: string
+): Promise<{ subscription: UserSubscriptionDoc; plan: SubscriptionPlanDoc } | null> => {
+  if (!businessId) return null;
+  const businessUsers = await usersCollection()
+    .find({ businessId, role: 'business' } as any)
+    .project({ _id: 1 } as any)
+    .toArray();
+
+  const ids = businessUsers.map((u) => u._id).filter((id) => typeof id === 'string' && id.length > 0);
+  if (ids.length === 0) return null;
+
+  const activeStatuses = ['active', 'trial', 'past_due'];
+  const subscription = await subsCollection().findOne(
+    { userId: { $in: ids }, status: { $in: activeStatuses } } as any,
+    { sort: { currentPeriodEnd: -1 } } as any
+  );
+  if (!subscription) return null;
+
+  const plan = await plansCollection().findOne({ _id: String(subscription.planId || '') } as any);
+  if (!plan) return null;
+
+  return { subscription, plan };
+};
 
 const app = express();
 app.use(express.json({ limit: '2mb' }));
@@ -134,9 +161,29 @@ app.post(
     if (!currentUser) return res.status(401).json({ error: 'User not found' });
 
     const payload = req.body as Partial<ProductDoc>;
-    const businessId = role === 'admin' ? (payload.businessId ? String(payload.businessId) : undefined) : String(currentUser.businessId || '');
-    if (role !== 'admin' && !businessId) return res.status(400).json({ error: 'businessId is required' });
+    const businessId = role === 'admin' ? String(payload.businessId || '') : String(currentUser.businessId || '');
+    if (!businessId) return res.status(400).json({ error: 'businessId is required' });
     if (!canAccessBusiness(role, currentUser, businessId)) return res.status(403).json({ error: 'Insufficient permissions' });
+
+    if (role !== 'admin') {
+      const current = await getActiveSubscriptionForBusiness(businessId);
+      if (!current) {
+        return res.status(403).json({ error: 'No active subscription. Please subscribe to create products.' });
+      }
+
+      const maxProducts = (current.plan as any).maxProducts;
+      if (maxProducts !== null && maxProducts !== undefined) {
+        const allowed = typeof maxProducts === 'number' ? maxProducts : Number(maxProducts);
+        if (Number.isFinite(allowed)) {
+          const used = await productsCollection().countDocuments({ businessId } as any);
+          if (used >= allowed) {
+            return res.status(403).json({
+              error: `Product limit reached. Your plan allows ${Math.floor(allowed)} products. You have used ${used}.`
+            });
+          }
+        }
+      }
+    }
 
     const now = new Date();
     const product: ProductDoc = {

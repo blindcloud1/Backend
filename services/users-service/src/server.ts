@@ -7,7 +7,7 @@ import jwt from 'jsonwebtoken';
 import { MongoClient } from 'mongodb';
 import crypto from 'crypto';
 import { EventBus, type CloudEvent } from '@blindscloud/event-bus';
-import type { BusinessDoc, UserDoc, UserRole } from '@blindscloud/models';
+import type { BusinessDoc, SubscriptionPlanDoc, UserDoc, UserRole, UserSubscriptionDoc } from '@blindscloud/models';
 import https from 'https';
 
 dotenv.config();
@@ -43,6 +43,8 @@ const eventBus = new EventBus({
 
 const usersCollection = () => mongo.db('blindscloud').collection<UserDoc>('users');
 const businessesCollection = () => mongo.db('blindscloud').collection<BusinessDoc>('businesses');
+const plansCollection = () => mongo.db('blindscloud').collection<SubscriptionPlanDoc>('subscription_plans');
+const subsCollection = () => mongo.db('blindscloud').collection<UserSubscriptionDoc>('user_subscriptions');
 
 const escapeRegExp = (value: string): string => {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -171,6 +173,31 @@ const resolveTargetBusinessId = async (req: AuthRequest, explicitBusinessId?: st
     return explicitBusinessId ? String(explicitBusinessId) : String(currentUser.businessId);
   }
   return String(currentUser.businessId);
+};
+
+const getActiveSubscriptionForBusiness = async (
+  businessId: string
+): Promise<{ subscription: UserSubscriptionDoc; plan: SubscriptionPlanDoc } | null> => {
+  if (!businessId) return null;
+  const businessUsers = await usersCollection()
+    .find({ businessId, role: 'business' } as any)
+    .project({ _id: 1 } as any)
+    .toArray();
+
+  const ids = businessUsers.map((u) => u._id).filter((id) => typeof id === 'string' && id.length > 0);
+  if (ids.length === 0) return null;
+
+  const activeStatuses = ['active', 'trial', 'past_due'];
+  const subscription = await subsCollection().findOne(
+    { userId: { $in: ids }, status: { $in: activeStatuses } } as any,
+    { sort: { currentPeriodEnd: -1 } } as any
+  );
+  if (!subscription) return null;
+
+  const plan = await plansCollection().findOne({ _id: String(subscription.planId || '') } as any);
+  if (!plan) return null;
+
+  return { subscription, plan };
 };
 
 const app = express();
@@ -882,6 +909,47 @@ app.post(
     }
     if ((createdRole === 'employee' || createdRole === 'merchant') && role === 'admin' && (!payload.parentId || typeof payload.parentId !== 'string')) {
       return res.status(400).json({ error: 'parentId is required for employee/merchant' });
+    }
+
+    if (createdRole !== 'admin' && typeof businessId === 'string' && businessId.length > 0) {
+      const current = await getActiveSubscriptionForBusiness(businessId);
+      if (!current) {
+        return res.status(403).json({ error: 'No active subscription. Please subscribe to add team members.' });
+      }
+
+      if (createdRole === 'employee') {
+        const maxEmployees = (current.plan as any).maxEmployees;
+        if (maxEmployees !== null && maxEmployees !== undefined) {
+          const allowed = typeof maxEmployees === 'number' ? maxEmployees : Number(maxEmployees);
+          if (Number.isFinite(allowed)) {
+            const used = await usersCollection().countDocuments({ businessId, role: 'employee' } as any);
+            if (used >= allowed) {
+              return res.status(403).json({
+                error: `Employee limit reached. Your plan allows ${Math.floor(allowed)} employees. You have ${used}.`
+              });
+            }
+          }
+        }
+      }
+
+      if (createdRole === 'business') {
+        const maxSubBusinessUsers = (current.plan as any).maxSubBusinessUsers;
+        if (maxSubBusinessUsers !== null && maxSubBusinessUsers !== undefined) {
+          const allowed = typeof maxSubBusinessUsers === 'number' ? maxSubBusinessUsers : Number(maxSubBusinessUsers);
+          if (Number.isFinite(allowed)) {
+            const business = await businessesCollection().findOne({ _id: businessId } as any);
+            const primaryId = typeof (business as any)?.adminId === 'string' ? String((business as any).adminId) : null;
+            const query: any = { businessId, role: 'business' };
+            if (primaryId) query._id = { $ne: primaryId };
+            const used = await usersCollection().countDocuments(query);
+            if (used >= allowed) {
+              return res.status(403).json({
+                error: `Business user limit reached. Your plan allows ${Math.floor(allowed)} additional business users. You have ${used}.`
+              });
+            }
+          }
+        }
+      }
     }
 
     const requiresEmailVerification = createdRole !== 'admin';

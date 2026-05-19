@@ -6,7 +6,17 @@ import jwt from 'jsonwebtoken';
 import { MongoClient } from 'mongodb';
 import crypto from 'crypto';
 import { EventBus, type CloudEvent } from '@blindscloud/event-bus';
-import type { CustomerDoc, JobDoc, JobImageDoc, JobStatus, MeasurementDoc, UserDoc, UserRole } from '@blindscloud/models';
+import type {
+  CustomerDoc,
+  JobDoc,
+  JobImageDoc,
+  JobStatus,
+  MeasurementDoc,
+  SubscriptionPlanDoc,
+  UserDoc,
+  UserRole,
+  UserSubscriptionDoc
+} from '@blindscloud/models';
 
 dotenv.config();
 
@@ -35,6 +45,8 @@ const customersCollection = () => mongo.db('blindscloud').collection<CustomerDoc
 const jobsCollection = () => mongo.db('blindscloud').collection<JobDoc>('jobs');
 const measurementsCollection = () => mongo.db('blindscloud').collection<MeasurementDoc>('measurements');
 const imagesCollection = () => mongo.db('blindscloud').collection<JobImageDoc>('images');
+const plansCollection = () => mongo.db('blindscloud').collection<SubscriptionPlanDoc>('subscription_plans');
+const subsCollection = () => mongo.db('blindscloud').collection<UserSubscriptionDoc>('user_subscriptions');
 
 const authenticate = (req: AuthRequest, res: Response, next: NextFunction) => {
   const header = req.header('authorization') || req.header('Authorization');
@@ -93,6 +105,55 @@ const parseDate = (value: unknown): Date | null => {
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return null;
   return d;
+};
+
+const getActiveSubscriptionForBusiness = async (
+  businessId: string
+): Promise<{ subscription: UserSubscriptionDoc; plan: SubscriptionPlanDoc } | null> => {
+  if (!businessId) return null;
+  const businessUsers = await usersCollection()
+    .find({ businessId, role: 'business' } as any)
+    .project({ _id: 1 } as any)
+    .toArray();
+
+  const ids = businessUsers.map((u) => u._id).filter((id) => typeof id === 'string' && id.length > 0);
+  if (ids.length === 0) return null;
+
+  const activeStatuses = ['active', 'trial', 'past_due'];
+  const subscription = await subsCollection().findOne(
+    { userId: { $in: ids }, status: { $in: activeStatuses } } as any,
+    { sort: { currentPeriodEnd: -1 } } as any
+  );
+  if (!subscription) return null;
+
+  const plan = await plansCollection().findOne({ _id: String(subscription.planId || '') } as any);
+  if (!plan) return null;
+
+  return { subscription, plan };
+};
+
+const inferBillingCycle = (sub: UserSubscriptionDoc): 'one_month' | 'monthly' | 'yearly' => {
+  const raw = String((sub as any).billingCycle || '').toLowerCase();
+  if (raw === 'one_month' || raw === 'monthly' || raw === 'yearly') return raw;
+
+  const startMs = sub.currentPeriodStart?.getTime?.() ?? NaN;
+  const endMs = sub.currentPeriodEnd?.getTime?.() ?? NaN;
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) return 'monthly';
+
+  const days = (endMs - startMs) / (1000 * 60 * 60 * 24);
+  if (days >= 300) return 'yearly';
+  return 'monthly';
+};
+
+const getMaxJobsForPeriod = (plan: SubscriptionPlanDoc, sub: UserSubscriptionDoc): number | null => {
+  const maxJobs = (plan as any).maxJobs;
+  if (maxJobs === null) return null;
+  const n = typeof maxJobs === 'number' ? maxJobs : Number(maxJobs);
+  if (!Number.isFinite(n)) return null;
+
+  const cycle = inferBillingCycle(sub);
+  const multiplier = cycle === 'yearly' ? 12 : 1;
+  return Math.max(0, Math.floor(n * multiplier));
 };
 
 const app = express();
@@ -165,6 +226,29 @@ app.post(
     if (!businessId) return res.status(400).json({ error: 'businessId is required' });
     if (!canAccessBusiness(role, currentUser, businessId)) return res.status(403).json({ error: 'Insufficient permissions' });
     if (customer.businessId !== businessId) return res.status(400).json({ error: 'Customer business mismatch' });
+
+    if (role !== 'admin') {
+      const current = await getActiveSubscriptionForBusiness(businessId);
+      if (!current) {
+        return res.status(403).json({ error: 'No active subscription. Please subscribe to create jobs.' });
+      }
+
+      const allowed = getMaxJobsForPeriod(current.plan, current.subscription);
+      if (typeof allowed === 'number') {
+        const used = await jobsCollection().countDocuments({
+          businessId,
+          createdAt: { $gte: current.subscription.currentPeriodStart, $lt: current.subscription.currentPeriodEnd }
+        } as any);
+
+        if (used >= allowed) {
+          const cycle = inferBillingCycle(current.subscription);
+          const unit = cycle === 'yearly' ? 'year' : 'month';
+          return res.status(403).json({
+            error: `Job limit reached. Your plan allows ${allowed} jobs per ${unit}. You have used ${used}.`
+          });
+        }
+      }
+    }
 
     const now = new Date();
     const job: JobDoc = {

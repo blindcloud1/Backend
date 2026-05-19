@@ -37,6 +37,8 @@ const eventBus = new event_bus_1.EventBus({
 });
 const usersCollection = () => mongo.db('blindscloud').collection('users');
 const businessesCollection = () => mongo.db('blindscloud').collection('businesses');
+const plansCollection = () => mongo.db('blindscloud').collection('subscription_plans');
+const subsCollection = () => mongo.db('blindscloud').collection('user_subscriptions');
 const escapeRegExp = (value) => {
     return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 };
@@ -154,6 +156,25 @@ const resolveTargetBusinessId = async (req, explicitBusinessId) => {
         return explicitBusinessId ? String(explicitBusinessId) : String(currentUser.businessId);
     }
     return String(currentUser.businessId);
+};
+const getActiveSubscriptionForBusiness = async (businessId) => {
+    if (!businessId)
+        return null;
+    const businessUsers = await usersCollection()
+        .find({ businessId, role: 'business' })
+        .project({ _id: 1 })
+        .toArray();
+    const ids = businessUsers.map((u) => u._id).filter((id) => typeof id === 'string' && id.length > 0);
+    if (ids.length === 0)
+        return null;
+    const activeStatuses = ['active', 'trial', 'past_due'];
+    const subscription = await subsCollection().findOne({ userId: { $in: ids }, status: { $in: activeStatuses } }, { sort: { currentPeriodEnd: -1 } });
+    if (!subscription)
+        return null;
+    const plan = await plansCollection().findOne({ _id: String(subscription.planId || '') });
+    if (!plan)
+        return null;
+    return { subscription, plan };
 };
 const app = (0, express_1.default)();
 app.use(express_1.default.json({ limit: '2mb' }));
@@ -741,6 +762,45 @@ app.post('/users', authenticate, requireAdminOrBusiness, [
     if ((createdRole === 'employee' || createdRole === 'merchant') && role === 'admin' && (!payload.parentId || typeof payload.parentId !== 'string')) {
         return res.status(400).json({ error: 'parentId is required for employee/merchant' });
     }
+    if (createdRole !== 'admin' && typeof businessId === 'string' && businessId.length > 0) {
+        const current = await getActiveSubscriptionForBusiness(businessId);
+        if (!current) {
+            return res.status(403).json({ error: 'No active subscription. Please subscribe to add team members.' });
+        }
+        if (createdRole === 'employee') {
+            const maxEmployees = current.plan.maxEmployees;
+            if (maxEmployees !== null && maxEmployees !== undefined) {
+                const allowed = typeof maxEmployees === 'number' ? maxEmployees : Number(maxEmployees);
+                if (Number.isFinite(allowed)) {
+                    const used = await usersCollection().countDocuments({ businessId, role: 'employee' });
+                    if (used >= allowed) {
+                        return res.status(403).json({
+                            error: `Employee limit reached. Your plan allows ${Math.floor(allowed)} employees. You have ${used}.`
+                        });
+                    }
+                }
+            }
+        }
+        if (createdRole === 'business') {
+            const maxSubBusinessUsers = current.plan.maxSubBusinessUsers;
+            if (maxSubBusinessUsers !== null && maxSubBusinessUsers !== undefined) {
+                const allowed = typeof maxSubBusinessUsers === 'number' ? maxSubBusinessUsers : Number(maxSubBusinessUsers);
+                if (Number.isFinite(allowed)) {
+                    const business = await businessesCollection().findOne({ _id: businessId });
+                    const primaryId = typeof business?.adminId === 'string' ? String(business.adminId) : null;
+                    const query = { businessId, role: 'business' };
+                    if (primaryId)
+                        query._id = { $ne: primaryId };
+                    const used = await usersCollection().countDocuments(query);
+                    if (used >= allowed) {
+                        return res.status(403).json({
+                            error: `Business user limit reached. Your plan allows ${Math.floor(allowed)} additional business users. You have ${used}.`
+                        });
+                    }
+                }
+            }
+        }
+    }
     const requiresEmailVerification = createdRole !== 'admin';
     const providedVerificationToken = typeof payload.verificationToken === 'string' ? payload.verificationToken : undefined;
     const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -866,4 +926,119 @@ app.delete('/users/:id', authenticate, requireAdminOrBusiness, async (req, res) 
 app.listen(PORT, '0.0.0.0', async () => {
     await mongo.connect();
     await eventBus.connect();
+    await eventBus.subscribe({
+        queueName: 'users-service.subscriptions.paid',
+        routingKeys: ['subscriptions.paid'],
+        onMessage: async (event) => {
+            const payload = event.payload;
+            const userId = String(payload?.userId || '');
+            if (!userId)
+                return;
+            const user = await usersCollection().findOne({ _id: userId });
+            if (!user?.email)
+                return;
+            const planName = String(payload?.planName || 'Subscription');
+            const planPrice = typeof payload?.planPrice === 'number' ? payload.planPrice : Number(payload?.planPrice || 0);
+            const billingCycleRaw = String(payload?.billingCycle || '');
+            const billingCycle = billingCycleRaw === 'one_month' || billingCycleRaw === 'yearly' || billingCycleRaw === 'monthly'
+                ? billingCycleRaw
+                : 'monthly';
+            const setupFeeAmount = typeof payload?.setupFeeAmount === 'number' ? payload.setupFeeAmount : Number(payload?.setupFeeAmount || 0);
+            const setupFeeCharged = Boolean(payload?.setupFeeCharged);
+            const termsUrl = String(payload?.termsUrl || FRONTEND_URL || '');
+            const start = new Date(String(payload?.periodStart || ''));
+            const end = new Date(String(payload?.periodEnd || ''));
+            const dateFmt = (d) => (Number.isNaN(d.getTime()) ? '' : d.toLocaleDateString('en-GB'));
+            const totalFirstPayment = planPrice + (setupFeeCharged ? setupFeeAmount : 0);
+            const currencySymbol = '£';
+            const subject = `Subscription Confirmed: ${planName}`;
+            const periodLine = dateFmt(start) && dateFmt(end) ? `${dateFmt(start)} - ${dateFmt(end)}` : '';
+            const billingLine = billingCycle === 'one_month'
+                ? 'One-month (billed once)'
+                : billingCycle === 'yearly'
+                    ? 'Yearly (billed yearly)'
+                    : 'Monthly (billed monthly)';
+            const text = [
+                `Hi ${user.name || 'there'},`,
+                '',
+                `Your subscription has been confirmed.`,
+                '',
+                `Plan: ${planName}`,
+                `Billing: ${billingLine}`,
+                periodLine ? `Period: ${periodLine}` : null,
+                billingCycle === 'one_month'
+                    ? `One-month price: ${currencySymbol}${planPrice.toFixed(2)}`
+                    : billingCycle === 'yearly'
+                        ? `Yearly price: ${currencySymbol}${planPrice.toFixed(2)}`
+                        : `Monthly price: ${currencySymbol}${planPrice.toFixed(2)}`,
+                setupFeeCharged ? `Setup fee (one-time): ${currencySymbol}${setupFeeAmount.toFixed(2)}` : null,
+                `Total paid today: ${currencySymbol}${totalFirstPayment.toFixed(2)}`,
+                '',
+                termsUrl ? `Terms & Conditions: ${termsUrl}` : null,
+                '',
+                'Thank you,',
+                'BlindsCloud'
+            ]
+                .filter(Boolean)
+                .join('\n');
+            const html = `
+        <div style="font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; line-height: 1.5; color: #111827;">
+          <div style="max-width: 600px; margin: 0 auto; border: 1px solid #E5E7EB; border-radius: 16px; overflow: hidden;">
+            <div style="background: linear-gradient(90deg,#2563EB,#4F46E5); padding: 20px 24px; color: white;">
+              <div style="font-size: 18px; font-weight: 800;">Subscription Confirmed</div>
+              <div style="opacity: 0.9; margin-top: 4px;">${planName}</div>
+            </div>
+            <div style="padding: 20px 24px;">
+              <div style="font-size: 14px; color: #374151;">Hi ${user.name || 'there'},</div>
+              <div style="margin-top: 10px; font-size: 14px; color: #374151;">
+                Your subscription payment has been confirmed. Here are your details:
+              </div>
+
+              <div style="margin-top: 16px; border: 1px solid #E5E7EB; border-radius: 12px; padding: 14px 16px;">
+                <div style="display:flex; justify-content: space-between; gap: 12px;">
+                  <div style="font-weight: 700;">Plan</div>
+                  <div>${planName}</div>
+                </div>
+                <div style="display:flex; justify-content: space-between; gap: 12px; margin-top: 8px;">
+                  <div style="font-weight: 700;">Billing</div>
+                  <div>${billingLine}</div>
+                </div>
+                ${periodLine ? `<div style="display:flex; justify-content: space-between; gap: 12px; margin-top: 8px;"><div style="font-weight: 700;">Period</div><div>${periodLine}</div></div>` : ''}
+                <div style="display:flex; justify-content: space-between; gap: 12px; margin-top: 8px;">
+                  <div style="font-weight: 700;">${billingCycle === 'one_month' ? 'One-month Price' : billingCycle === 'yearly' ? 'Yearly Price' : 'Monthly Price'}</div>
+                  <div>${currencySymbol}${planPrice.toFixed(2)}</div>
+                </div>
+                ${setupFeeCharged
+                ? `<div style="display:flex; justify-content: space-between; gap: 12px; margin-top: 8px;">
+                        <div style="font-weight: 700;">Setup Fee (one-time)</div>
+                        <div>${currencySymbol}${setupFeeAmount.toFixed(2)}</div>
+                      </div>`
+                : ''}
+                <div style="display:flex; justify-content: space-between; gap: 12px; margin-top: 10px; padding-top: 10px; border-top: 1px dashed #E5E7EB;">
+                  <div style="font-weight: 800;">Total Paid Today</div>
+                  <div style="font-weight: 800;">${currencySymbol}${totalFirstPayment.toFixed(2)}</div>
+                </div>
+              </div>
+
+              ${termsUrl
+                ? `<div style="margin-top: 16px; font-size: 13px; color: #374151;">
+                      Terms & Conditions: <a href="${termsUrl}" style="color:#2563EB; font-weight:700;">View terms</a>
+                    </div>`
+                : ''}
+
+              <div style="margin-top: 18px; font-size: 13px; color: #6B7280;">
+                If you have any questions, reply to this email.
+              </div>
+            </div>
+          </div>
+        </div>
+      `.trim();
+            await sendSendGridMail({
+                to: user.email,
+                subject,
+                html,
+                text
+            });
+        }
+    });
 });
