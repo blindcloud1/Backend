@@ -392,8 +392,8 @@ app.post(
 
   const frontendBase = getFrontendBaseUrl(req);
   const termsUrl = `${frontendBase}/terms-and-conditions`;
-  const successUrl = `${frontendBase}/`;
-  const cancelUrl = `${frontendBase}/`;
+  const successUrl = `${frontendBase}/?stripeCheckout=success&session_id={CHECKOUT_SESSION_ID}`;
+  const cancelUrl = `${frontendBase}/?stripeCheckout=cancel`;
 
   const commonMetadata = {
     userId: req.user!.id,
@@ -478,26 +478,11 @@ app.post(
   }
 );
 
-app.post('/stripe/webhook', async (req: any, res: Response) => {
-  if (!stripe || !STRIPE_WEBHOOK_SECRET) {
-    return res.status(500).send('Stripe webhook not configured');
-  }
-
-  const sig = req.header('stripe-signature');
-  if (!sig) return res.status(400).send('Missing stripe-signature');
-
-  let event: Stripe.Event;
-  try {
-    event = stripe.webhooks.constructEvent(req.rawBody, sig, STRIPE_WEBHOOK_SECRET);
-  } catch (err: any) {
-    return res.status(400).send(`Webhook Error: ${err?.message || String(err)}`);
-  }
-
-  if (event.type !== 'checkout.session.completed') {
-    return res.json({ received: true });
-  }
-
-  const session = event.data.object as Stripe.Checkout.Session;
+const processCheckoutSessionCompleted = async (
+  session: Stripe.Checkout.Session,
+  req: any,
+  opts?: { enforceUserId?: string }
+): Promise<'processed' | 'ignored' | 'already_processed'> => {
   const userId = String((session.metadata || {}).userId || '');
   const planId = String((session.metadata || {}).planId || '');
   const billingCycleRaw = String((session.metadata || {}).billingCycle || '');
@@ -508,23 +493,27 @@ app.post('/stripe/webhook', async (req: any, res: Response) => {
   const setupFeeCharged = String((session.metadata || {}).setupFeeCharged || '').toLowerCase() === 'true';
   const setupFeeAmount = Number((session.metadata || {}).setupFeeAmount || 0) || 0;
   const termsUrl = String((session.metadata || {}).termsUrl || '');
+  const paymentStatus = String((session as any).payment_status || '').toLowerCase();
 
-  if (!userId || !planId) return res.json({ received: true });
+  if (!userId || !planId) return 'ignored';
+  if (opts?.enforceUserId && userId !== opts.enforceUserId) throw new Error('Session user mismatch');
+  if (paymentStatus && paymentStatus !== 'paid' && paymentStatus !== 'no_payment_required') return 'ignored';
 
   const stripePaymentIntentId = typeof session.payment_intent === 'string' ? session.payment_intent : null;
   if (stripePaymentIntentId) {
     const existingPayment = await paymentsCollection().findOne({ stripePaymentIntentId } as any);
-    if (existingPayment) return res.json({ received: true });
+    if (existingPayment) return 'already_processed';
   }
+
   const stripeSubscriptionId = typeof session.subscription === 'string' ? session.subscription : null;
   if (stripeSubscriptionId) {
     const existing = await subsCollection().findOne({ stripeSubscriptionId } as any);
-    if (existing) return res.json({ received: true });
+    if (existing) return 'already_processed';
   }
 
   const plan = await plansCollection().findOne({ _id: planId } as any);
   const user = await usersCollection().findOne({ _id: userId } as any);
-  if (!plan || !user) return res.json({ received: true });
+  if (!plan || !user) return 'ignored';
 
   const nowMs = Date.now();
   const activeStatuses: SubscriptionStatus[] = ['active', 'trial', 'past_due'];
@@ -546,10 +535,8 @@ app.post('/stripe/webhook', async (req: any, res: Response) => {
   }
 
   const stripeSub = stripeSubscriptionId ? await stripe.subscriptions.retrieve(stripeSubscriptionId) : null;
-  const stripeStartMs =
-    stripeSub?.current_period_start ? stripeSub.current_period_start * 1000 : nowMs;
-  const stripeEndMs =
-    stripeSub?.current_period_end ? stripeSub.current_period_end * 1000 : nowMs;
+  const stripeStartMs = stripeSub?.current_period_start ? stripeSub.current_period_start * 1000 : nowMs;
+  const stripeEndMs = stripeSub?.current_period_end ? stripeSub.current_period_end * 1000 : nowMs;
 
   const startDate = new Date(stripeStartMs);
   const endDate =
@@ -562,13 +549,14 @@ app.post('/stripe/webhook', async (req: any, res: Response) => {
         })()
       : new Date(stripeEndMs + remainingMs);
 
-  const mappedStatus: SubscriptionStatus = stripeSub?.status === 'trialing'
-    ? 'trial'
-    : stripeSub?.status === 'past_due'
-    ? 'past_due'
-    : stripeSub?.status === 'active'
-    ? 'active'
-    : 'active';
+  const mappedStatus: SubscriptionStatus =
+    stripeSub?.status === 'trialing'
+      ? 'trial'
+      : stripeSub?.status === 'past_due'
+      ? 'past_due'
+      : stripeSub?.status === 'active'
+      ? 'active'
+      : 'active';
 
   const now = new Date();
   const subscription: UserSubscriptionDoc = {
@@ -660,6 +648,46 @@ app.post('/stripe/webhook', async (req: any, res: Response) => {
   };
   await eventBus.publish('subscriptions.paid', emailEvent);
 
+  return 'processed';
+};
+
+app.post(
+  '/stripe/confirm',
+  authenticate,
+  [body('sessionId').isString().isLength({ min: 1 })],
+  async (req: AuthRequest, res: Response) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+    if (!stripe) return res.status(500).json({ error: 'Stripe is not configured' });
+
+    const sessionId = String((req.body as any)?.sessionId || '');
+    const session = await stripe.checkout.sessions.retrieve(sessionId);
+    const result = await processCheckoutSessionCompleted(session as any, req, { enforceUserId: req.user!.id });
+    return res.json({ status: 'OK', result });
+  }
+);
+
+app.post('/stripe/webhook', async (req: any, res: Response) => {
+  if (!stripe || !STRIPE_WEBHOOK_SECRET) {
+    return res.status(500).send('Stripe webhook not configured');
+  }
+
+  const sig = req.header('stripe-signature');
+  if (!sig) return res.status(400).send('Missing stripe-signature');
+
+  let event: Stripe.Event;
+  try {
+    event = stripe.webhooks.constructEvent(req.rawBody, sig, STRIPE_WEBHOOK_SECRET);
+  } catch (err: any) {
+    return res.status(400).send(`Webhook Error: ${err?.message || String(err)}`);
+  }
+
+  if (event.type !== 'checkout.session.completed') {
+    return res.json({ received: true });
+  }
+
+  const session = event.data.object as Stripe.Checkout.Session;
+  await processCheckoutSessionCompleted(session, req);
   return res.json({ received: true });
 });
 
