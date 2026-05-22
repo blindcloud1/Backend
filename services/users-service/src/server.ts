@@ -1096,11 +1096,16 @@ app.listen(PORT, '0.0.0.0', async () => {
 
   await eventBus.subscribe<{
     userId: string;
+    planId?: string;
     planName: string;
+    planDescription?: string;
+    planFeatures?: string[];
     planPrice: number;
     billingCycle: 'one_month' | 'monthly' | 'yearly';
     setupFeeAmount: number;
     setupFeeCharged: boolean;
+    amountPaid?: number;
+    currency?: string;
     periodStart: string;
     periodEnd: string;
     termsUrl: string;
@@ -1115,7 +1120,12 @@ app.listen(PORT, '0.0.0.0', async () => {
       const user = await usersCollection().findOne({ _id: userId } as any);
       if (!user?.email) return;
 
+      const planId = String(payload?.planId || '');
       const planName = String(payload?.planName || 'Subscription');
+      let planDescription = String(payload?.planDescription || '');
+      let planFeatures = Array.isArray(payload?.planFeatures)
+        ? payload.planFeatures.map((f: any) => String(f || '').trim()).filter(Boolean)
+        : [];
       const planPrice = typeof payload?.planPrice === 'number' ? payload.planPrice : Number(payload?.planPrice || 0);
       const billingCycleRaw = String(payload?.billingCycle || '');
       const billingCycle =
@@ -1125,19 +1135,34 @@ app.listen(PORT, '0.0.0.0', async () => {
       const setupFeeAmount =
         typeof payload?.setupFeeAmount === 'number' ? payload.setupFeeAmount : Number(payload?.setupFeeAmount || 0);
       const setupFeeCharged = Boolean(payload?.setupFeeCharged);
+      const amountPaidRaw = typeof payload?.amountPaid === 'number' ? payload.amountPaid : Number(payload?.amountPaid);
+      const amountPaid = Number.isFinite(amountPaidRaw) ? amountPaidRaw : null;
+      const currency = String(payload?.currency || 'GBP').toUpperCase();
       const termsUrl = String(payload?.termsUrl || FRONTEND_URL || '');
+
+      if (planId && (!planDescription || planFeatures.length === 0)) {
+        const plan = await plansCollection().findOne({ _id: planId } as any);
+        if (plan) {
+          if (!planDescription) planDescription = String((plan as any).description || '');
+          if (planFeatures.length === 0 && Array.isArray((plan as any).features)) {
+            planFeatures = (plan as any).features.map((f: any) => String(f || '').trim()).filter(Boolean);
+          }
+        }
+      }
 
       const start = new Date(String(payload?.periodStart || ''));
       const end = new Date(String(payload?.periodEnd || ''));
       const dateFmt = (d: Date) => (Number.isNaN(d.getTime()) ? '' : d.toLocaleDateString('en-GB'));
 
-      const totalFirstPayment = planPrice + (setupFeeCharged ? setupFeeAmount : 0);
-      const currencySymbol = '£';
+      const totalFirstPayment = amountPaid !== null ? amountPaid : planPrice + (setupFeeCharged ? setupFeeAmount : 0);
+      const currencySymbol = currency === 'GBP' ? '£' : currency === 'USD' ? '$' : currency === 'EUR' ? '€' : '';
+      const money = (n: number) => (currencySymbol ? `${currencySymbol}${n.toFixed(2)}` : `${currency} ${n.toFixed(2)}`);
 
       const subject = `Subscription Confirmed: ${planName}`;
 
-      const periodLine =
-        dateFmt(start) && dateFmt(end) ? `${dateFmt(start)} - ${dateFmt(end)}` : '';
+      const startLine = dateFmt(start);
+      const endLine = dateFmt(end);
+      const periodLine = startLine && endLine ? `${startLine} - ${endLine}` : '';
       const billingLine =
         billingCycle === 'one_month'
           ? 'One-month (billed once)'
@@ -1145,21 +1170,32 @@ app.listen(PORT, '0.0.0.0', async () => {
           ? 'Yearly (billed yearly)'
           : 'Monthly (billed monthly)';
 
+      const maxFeatures = 20;
+      const trimmedFeatures = planFeatures.slice(0, maxFeatures);
+      const extraFeaturesCount = Math.max(0, planFeatures.length - trimmedFeatures.length);
+
       const text = [
         `Hi ${user.name || 'there'},`,
         '',
         `Your subscription has been confirmed.`,
         '',
         `Plan: ${planName}`,
+        planDescription ? `Description: ${planDescription}` : null,
         `Billing: ${billingLine}`,
         periodLine ? `Period: ${periodLine}` : null,
+        startLine ? `Start date: ${startLine}` : null,
+        endLine ? `End date: ${endLine}` : null,
         billingCycle === 'one_month'
-          ? `One-month price: ${currencySymbol}${planPrice.toFixed(2)}`
+          ? `One-month price: ${money(planPrice)}`
           : billingCycle === 'yearly'
-          ? `Yearly price: ${currencySymbol}${planPrice.toFixed(2)}`
-          : `Monthly price: ${currencySymbol}${planPrice.toFixed(2)}`,
-        setupFeeCharged ? `Setup fee (one-time): ${currencySymbol}${setupFeeAmount.toFixed(2)}` : null,
-        `Total paid today: ${currencySymbol}${totalFirstPayment.toFixed(2)}`,
+          ? `Yearly price: ${money(planPrice)}`
+          : `Monthly price: ${money(planPrice)}`,
+        setupFeeCharged ? `Setup fee (one-time): ${money(setupFeeAmount)}` : null,
+        `Total paid today: ${money(totalFirstPayment)}`,
+        '',
+        trimmedFeatures.length ? 'Included:' : null,
+        ...trimmedFeatures.map((f) => `- ${f}`),
+        extraFeaturesCount > 0 ? `- And ${extraFeaturesCount} more` : null,
         '',
         termsUrl ? `Terms & Conditions: ${termsUrl}` : null,
         '',
@@ -1187,28 +1223,43 @@ app.listen(PORT, '0.0.0.0', async () => {
                   <div style="font-weight: 700;">Plan</div>
                   <div>${planName}</div>
                 </div>
+                ${planDescription ? `<div style="margin-top: 8px; font-size: 13px; color: #374151;">${planDescription}</div>` : ''}
                 <div style="display:flex; justify-content: space-between; gap: 12px; margin-top: 8px;">
                   <div style="font-weight: 700;">Billing</div>
                   <div>${billingLine}</div>
                 </div>
                 ${periodLine ? `<div style="display:flex; justify-content: space-between; gap: 12px; margin-top: 8px;"><div style="font-weight: 700;">Period</div><div>${periodLine}</div></div>` : ''}
+                ${startLine ? `<div style="display:flex; justify-content: space-between; gap: 12px; margin-top: 8px;"><div style="font-weight: 700;">Start date</div><div>${startLine}</div></div>` : ''}
+                ${endLine ? `<div style="display:flex; justify-content: space-between; gap: 12px; margin-top: 8px;"><div style="font-weight: 700;">End date</div><div>${endLine}</div></div>` : ''}
                 <div style="display:flex; justify-content: space-between; gap: 12px; margin-top: 8px;">
                   <div style="font-weight: 700;">${billingCycle === 'one_month' ? 'One-month Price' : billingCycle === 'yearly' ? 'Yearly Price' : 'Monthly Price'}</div>
-                  <div>${currencySymbol}${planPrice.toFixed(2)}</div>
+                  <div>${money(planPrice)}</div>
                 </div>
                 ${
                   setupFeeCharged
                     ? `<div style="display:flex; justify-content: space-between; gap: 12px; margin-top: 8px;">
                         <div style="font-weight: 700;">Setup Fee (one-time)</div>
-                        <div>${currencySymbol}${setupFeeAmount.toFixed(2)}</div>
+                        <div>${money(setupFeeAmount)}</div>
                       </div>`
                     : ''
                 }
                 <div style="display:flex; justify-content: space-between; gap: 12px; margin-top: 10px; padding-top: 10px; border-top: 1px dashed #E5E7EB;">
                   <div style="font-weight: 800;">Total Paid Today</div>
-                  <div style="font-weight: 800;">${currencySymbol}${totalFirstPayment.toFixed(2)}</div>
+                  <div style="font-weight: 800;">${money(totalFirstPayment)}</div>
                 </div>
               </div>
+
+              ${
+                trimmedFeatures.length
+                  ? `<div style="margin-top: 14px; border: 1px solid #E5E7EB; border-radius: 12px; padding: 14px 16px;">
+                      <div style="font-weight: 800; margin-bottom: 8px;">What’s included</div>
+                      <ul style="margin: 0; padding-left: 18px; color: #374151; font-size: 13px;">
+                        ${trimmedFeatures.map((f) => `<li style="margin: 4px 0;">${f}</li>`).join('')}
+                        ${extraFeaturesCount > 0 ? `<li style="margin: 4px 0;">And ${extraFeaturesCount} more</li>` : ''}
+                      </ul>
+                    </div>`
+                  : ''
+              }
 
               ${
                 termsUrl

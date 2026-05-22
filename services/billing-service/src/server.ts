@@ -510,6 +510,12 @@ app.post('/stripe/webhook', async (req: any, res: Response) => {
   const termsUrl = String((session.metadata || {}).termsUrl || '');
 
   if (!userId || !planId) return res.json({ received: true });
+
+  const stripePaymentIntentId = typeof session.payment_intent === 'string' ? session.payment_intent : null;
+  if (stripePaymentIntentId) {
+    const existingPayment = await paymentsCollection().findOne({ stripePaymentIntentId } as any);
+    if (existingPayment) return res.json({ received: true });
+  }
   const stripeSubscriptionId = typeof session.subscription === 'string' ? session.subscription : null;
   if (stripeSubscriptionId) {
     const existing = await subsCollection().findOne({ stripeSubscriptionId } as any);
@@ -595,7 +601,7 @@ app.post('/stripe/webhook', async (req: any, res: Response) => {
       subscriptionId: subscription._id,
       amount: amountTotal / 100,
       currency,
-      stripePaymentIntentId: typeof session.payment_intent === 'string' ? session.payment_intent : undefined,
+      stripePaymentIntentId: stripePaymentIntentId || undefined,
       stripeInvoiceId: undefined,
       status: 'succeeded',
       paymentDate: new Date(),
@@ -606,15 +612,26 @@ app.post('/stripe/webhook', async (req: any, res: Response) => {
 
   const frontendBase = getFrontendBaseUrl(req);
   const finalTermsUrl = termsUrl || `${frontendBase}/terms-and-conditions`;
-  const planPrice = typeof (plan as any).price === 'number' ? (plan as any).price : Number((plan as any).price || 0);
+  const pickNumber = (value: any): number => (typeof value === 'number' ? value : Number(value || 0) || 0);
+  const planPrice =
+    billingCycle === 'one_month'
+      ? pickNumber((plan as any).priceOneMonth ?? (plan as any).price)
+      : billingCycle === 'yearly'
+      ? pickNumber((plan as any).priceYearly ?? (plan as any).price)
+      : pickNumber((plan as any).price);
 
   const emailEvent: CloudEvent<{
     userId: string;
+    planId: string;
     planName: string;
+    planDescription?: string;
+    planFeatures?: string[];
     planPrice: number;
     billingCycle: 'one_month' | 'monthly' | 'yearly';
     setupFeeAmount: number;
     setupFeeCharged: boolean;
+    amountPaid?: number;
+    currency?: string;
     periodStart: string;
     periodEnd: string;
     termsUrl: string;
@@ -626,11 +643,16 @@ app.post('/stripe/webhook', async (req: any, res: Response) => {
     occurredAt: new Date().toISOString(),
     payload: {
       userId,
+      planId,
       planName: String((plan as any).name || ''),
+      planDescription: String((plan as any).description || ''),
+      planFeatures: Array.isArray((plan as any).features) ? (plan as any).features.map((f: any) => String(f)) : [],
       planPrice,
       billingCycle,
       setupFeeAmount,
       setupFeeCharged,
+      amountPaid: amountTotal !== null ? amountTotal / 100 : undefined,
+      currency,
       periodStart: startDate.toISOString(),
       periodEnd: endDate.toISOString(),
       termsUrl: finalTermsUrl
