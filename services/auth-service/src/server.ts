@@ -8,6 +8,7 @@ import { MongoClient } from 'mongodb';
 import { EventBus, type CloudEvent } from '@blindscloud/event-bus';
 import type { UserDoc } from '@blindscloud/models';
 import crypto from 'crypto';
+import https from 'https';
 
 dotenv.config();
 
@@ -17,6 +18,10 @@ const MONGO_URL = process.env.MONGO_URL || '';
 const RABBITMQ_URL = process.env.RABBITMQ_URL || '';
 const EVENT_EXCHANGE = process.env.EVENT_EXCHANGE || 'blindscloud.events';
 const SEED_DEMO = (process.env.SEED_DEMO || '').toLowerCase() === 'true';
+const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:5173';
+const SENDGRID_API_KEY = process.env.SENDGRID_API_KEY || '';
+const SENDGRID_FROM_EMAIL = process.env.SENDGRID_FROM_EMAIL || 'support@blindscloud.co.uk';
+const SENDGRID_FROM_NAME = process.env.SENDGRID_FROM_NAME || 'BlindsCloud';
 
 if (!JWT_SECRET) {
   throw new Error('JWT_SECRET is required');
@@ -40,6 +45,58 @@ const eventBus = new EventBus({
 });
 
 const getUsersCollection = () => mongo.db('blindscloud').collection<UserDoc>('users');
+
+const sendSendGridMail = async (opts: { to: string; subject: string; html: string; text: string }) => {
+  if (!SENDGRID_API_KEY) {
+    throw new Error('SENDGRID_API_KEY is not configured');
+  }
+
+  const bodyJson: any = {
+    personalizations: [
+      {
+        to: [{ email: opts.to }],
+        subject: opts.subject
+      }
+    ],
+    from: { email: SENDGRID_FROM_EMAIL, name: SENDGRID_FROM_NAME },
+    content: [
+      { type: 'text/plain', value: opts.text },
+      { type: 'text/html', value: opts.html }
+    ]
+  };
+
+  await new Promise<void>((resolve, reject) => {
+    const raw = JSON.stringify(bodyJson);
+    const contentLength = Buffer.byteLength(raw);
+    const req2 = https.request(
+      {
+        hostname: 'api.sendgrid.com',
+        path: '/v3/mail/send',
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${SENDGRID_API_KEY}`,
+          'Content-Type': 'application/json',
+          'Content-Length': contentLength
+        }
+      },
+      (res2) => {
+        let responseBody = '';
+        res2.on('data', (chunk) => {
+          responseBody += String(chunk);
+        });
+        res2.on('end', () => {
+          const code = res2.statusCode || 0;
+          if (code >= 200 && code < 300) return resolve();
+          return reject(new Error(`SendGrid error ${code}: ${responseBody}`));
+        });
+      }
+    );
+    req2.on('error', reject);
+    req2.setTimeout(10000, () => req2.destroy(new Error('SendGrid request timeout')));
+    req2.write(raw);
+    req2.end();
+  });
+};
 
 app.get('/health', async (_req: Request, res: Response) => {
   try {
@@ -119,6 +176,64 @@ app.post('/login', loginValidators, handleLogin);
 app.post('/auth/logout', (_req: Request, res: Response) => {
   res.json({ status: 'OK' });
 });
+
+app.post(
+  '/auth/forgot-password',
+  [body('email').isEmail().normalizeEmail()],
+  async (req: Request, res: Response) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ error: 'Enter a valid email' });
+
+    const email = String((req.body as any)?.email || '').trim().toLowerCase();
+    const users = getUsersCollection();
+    const user = await users.findOne({ email });
+
+    const responseMessage = 'If this email exists, a reset link has been sent';
+    if (!user || !user.emailVerified) {
+      return res.json({ message: responseMessage });
+    }
+
+    const token = crypto.randomUUID();
+    await users.updateOne(
+      { _id: user._id },
+      { $set: { verificationToken: token, updatedAt: new Date() } as any }
+    );
+
+    const base = FRONTEND_URL.replace(/\/$/, '');
+    const resetUrl = `${base}/reset-password?token=${encodeURIComponent(token)}`;
+
+    const subject = 'Reset Your Password - BlindsCloud';
+    const text =
+      `Password Reset Request\n\n` +
+      `Hello ${String((user as any).name || '').trim() || 'there'},\n\n` +
+      `To reset your password, open this link:\n${resetUrl}\n\n` +
+      `If you did not request this, you can ignore this email.\n`;
+    const html = `
+      <div style="font-family: Arial, sans-serif; max-width: 640px; margin: 0 auto; padding: 16px;">
+        <h2 style="margin: 0 0 12px; color: #111827;">Password Reset Request</h2>
+        <p style="margin: 0 0 12px; color: #374151;">Hello ${String((user as any).name || '').trim() || 'there'},</p>
+        <p style="margin: 0 0 12px; color: #374151;">We received a request to reset your password. Click below to set a new password:</p>
+        <p style="margin: 16px 0;">
+          <a href="${resetUrl}" style="display:inline-block;background:#2563eb;color:#fff;text-decoration:none;padding:10px 16px;border-radius:8px;">
+            Reset Password
+          </a>
+        </p>
+        <p style="margin: 12px 0; color: #6b7280; font-size: 12px;">If you did not request this, you can ignore this email.</p>
+        <p style="word-break: break-all; color:#111827; font-size: 12px; margin: 0;">${resetUrl}</p>
+      </div>
+    `.trim();
+
+    try {
+      await sendSendGridMail({ to: email, subject, html, text });
+    } catch (err: any) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error('Password reset email error:', message);
+      console.log('Password reset link:', resetUrl);
+    }
+
+    return res.json({ message: responseMessage });
+  }
+);
 
 app.post(
   '/auth/verify-email',

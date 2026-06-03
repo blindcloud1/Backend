@@ -58,7 +58,7 @@ const requireAdmin = (req: AuthRequest, res: Response, next: NextFunction) => {
 
 const requireAdminOrBusiness = (req: AuthRequest, res: Response, next: NextFunction) => {
   const role = req.user?.role?.toLowerCase();
-  if (role === 'admin' || role === 'business') return next();
+  if (role === 'admin' || role === 'business' || role === 'employee') return next();
   return res.status(403).json({ error: 'Insufficient permissions' });
 };
 
@@ -68,6 +68,14 @@ const getCurrentUser = async (req: AuthRequest): Promise<UserDoc | null> => {
 
 const canNotifyRecipient = (role: string, currentUser: UserDoc, recipient: UserDoc): boolean => {
   if (role === 'admin') return true;
+  if (role === 'employee') {
+    const currentBusinessId = String(currentUser.businessId || '');
+    const recipientBusinessId = String(recipient.businessId || '');
+    const recipientRole = String(recipient.role || '').toLowerCase();
+    if (!currentBusinessId) return false;
+    if (recipientRole !== 'business') return false;
+    return recipientBusinessId === currentBusinessId;
+  }
   if (role !== 'business') return false;
 
   const currentKeys = [currentUser.businessId, currentUser._id].filter(Boolean).map(String);
