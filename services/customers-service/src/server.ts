@@ -107,7 +107,12 @@ app.post(
   '/customers',
   authenticate,
   requireAdminOrBusiness,
-  [body('name').isLength({ min: 1 }), body('address').isLength({ min: 1 })],
+  [
+    body('name').isLength({ min: 1, max: 50 }),
+    body('address').isLength({ min: 1 }),
+    body('email').optional({ checkFalsy: true }).isEmail().normalizeEmail(),
+    body('postcode').optional({ checkFalsy: true }).matches(/^\d+$/)
+  ],
   async (req: AuthRequest, res: Response) => {
     const errors = validationResult(req);
     if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
@@ -121,11 +126,17 @@ app.post(
     const businessId = role === 'admin' ? String(payload.businessId || '') : String(currentUser.businessId || '');
     if (!businessId) return res.status(400).json({ error: 'businessId is required' });
 
+    let email: string | undefined;
+    if (typeof payload.email === 'string') {
+      const normalized = payload.email.trim().toLowerCase();
+      if (normalized) email = normalized;
+    }
+
     const customer: CustomerDoc = {
       _id: crypto.randomUUID(),
       businessId,
       name: String(payload.name || ''),
-      email: payload.email,
+      email,
       phone: payload.phone,
       mobile: payload.mobile,
       address: String(payload.address || ''),
@@ -150,8 +161,14 @@ app.post(
     res.status(201).json({ ...customer, createdAt: customer.createdAt.toISOString(), updatedAt: customer.updatedAt?.toISOString() });
   }
 );
-
-app.put('/customers/:id', authenticate, requireAdminOrBusiness, async (req: AuthRequest, res: Response) => {
+app.put(
+  '/customers/:id',
+  authenticate,
+  requireAdminOrBusiness,
+  [body('email').optional({ checkFalsy: true }).isEmail().normalizeEmail(), body('postcode').optional({ checkFalsy: true }).matches(/^\d+$/)],
+  async (req: AuthRequest, res: Response) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
   const role = req.user!.role.toLowerCase();
   const currentUser = await getCurrentUser(req);
   if (!currentUser) return res.status(401).json({ error: 'User not found' });
@@ -165,6 +182,22 @@ app.put('/customers/:id', authenticate, requireAdminOrBusiness, async (req: Auth
   }
 
   const updates = req.body as Partial<CustomerDoc>;
+  if (typeof (updates as any).email === 'string') {
+    const normalized = String((updates as any).email || '').trim().toLowerCase();
+    if (!normalized) {
+      delete (updates as any).email;
+    } else {
+      (updates as any).email = normalized;
+    }
+  }
+  if (typeof (updates as any).postcode === 'string') {
+    const normalized = String((updates as any).postcode || '').trim();
+    if (!normalized) {
+      delete (updates as any).postcode;
+    } else {
+      (updates as any).postcode = normalized;
+    }
+  }
   delete (updates as any)._id;
   delete (updates as any).businessId;
   delete (updates as any).createdAt;
@@ -187,7 +220,8 @@ app.put('/customers/:id', authenticate, requireAdminOrBusiness, async (req: Auth
   await eventBus.publish('customers.updated', event);
 
   res.json({ ...updated, createdAt: updated.createdAt.toISOString(), updatedAt: updated.updatedAt?.toISOString() });
-});
+  }
+);
 
 app.delete('/customers/:id', authenticate, requireAdminOrBusiness, async (req: AuthRequest, res: Response) => {
   const role = req.user!.role.toLowerCase();

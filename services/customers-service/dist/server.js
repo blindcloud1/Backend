@@ -96,7 +96,12 @@ app.get('/customers/:id', authenticate, async (req, res) => {
     }
     res.json({ ...customer, createdAt: customer.createdAt.toISOString(), updatedAt: customer.updatedAt?.toISOString() });
 });
-app.post('/customers', authenticate, requireAdminOrBusiness, [(0, express_validator_1.body)('name').isLength({ min: 1 }), (0, express_validator_1.body)('address').isLength({ min: 1 })], async (req, res) => {
+app.post('/customers', authenticate, requireAdminOrBusiness, [
+    (0, express_validator_1.body)('name').isLength({ min: 1, max: 50 }),
+    (0, express_validator_1.body)('address').isLength({ min: 1 }),
+    (0, express_validator_1.body)('email').optional({ checkFalsy: true }).isEmail().normalizeEmail(),
+    (0, express_validator_1.body)('postcode').optional({ checkFalsy: true }).matches(/^\d+$/)
+], async (req, res) => {
     const errors = (0, express_validator_1.validationResult)(req);
     if (!errors.isEmpty())
         return res.status(400).json({ errors: errors.array() });
@@ -109,11 +114,17 @@ app.post('/customers', authenticate, requireAdminOrBusiness, [(0, express_valida
     const businessId = role === 'admin' ? String(payload.businessId || '') : String(currentUser.businessId || '');
     if (!businessId)
         return res.status(400).json({ error: 'businessId is required' });
+    let email;
+    if (typeof payload.email === 'string') {
+        const normalized = payload.email.trim().toLowerCase();
+        if (normalized)
+            email = normalized;
+    }
     const customer = {
         _id: crypto_1.default.randomUUID(),
         businessId,
         name: String(payload.name || ''),
-        email: payload.email,
+        email,
         phone: payload.phone,
         mobile: payload.mobile,
         address: String(payload.address || ''),
@@ -134,7 +145,10 @@ app.post('/customers', authenticate, requireAdminOrBusiness, [(0, express_valida
     await eventBus.publish('customers.created', event);
     res.status(201).json({ ...customer, createdAt: customer.createdAt.toISOString(), updatedAt: customer.updatedAt?.toISOString() });
 });
-app.put('/customers/:id', authenticate, requireAdminOrBusiness, async (req, res) => {
+app.put('/customers/:id', authenticate, requireAdminOrBusiness, [(0, express_validator_1.body)('email').optional({ checkFalsy: true }).isEmail().normalizeEmail(), (0, express_validator_1.body)('postcode').optional({ checkFalsy: true }).matches(/^\d+$/)], async (req, res) => {
+    const errors = (0, express_validator_1.validationResult)(req);
+    if (!errors.isEmpty())
+        return res.status(400).json({ errors: errors.array() });
     const role = req.user.role.toLowerCase();
     const currentUser = await getCurrentUser(req);
     if (!currentUser)
@@ -147,6 +161,24 @@ app.put('/customers/:id', authenticate, requireAdminOrBusiness, async (req, res)
         return res.status(403).json({ error: 'Insufficient permissions' });
     }
     const updates = req.body;
+    if (typeof updates.email === 'string') {
+        const normalized = String(updates.email || '').trim().toLowerCase();
+        if (!normalized) {
+            delete updates.email;
+        }
+        else {
+            updates.email = normalized;
+        }
+    }
+    if (typeof updates.postcode === 'string') {
+        const normalized = String(updates.postcode || '').trim();
+        if (!normalized) {
+            delete updates.postcode;
+        }
+        else {
+            updates.postcode = normalized;
+        }
+    }
     delete updates._id;
     delete updates.businessId;
     delete updates.createdAt;

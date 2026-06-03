@@ -194,6 +194,10 @@ app.post('/jobs', authenticate, [(0, express_validator_1.body)('title').isLength
     const scheduledDate = parseDate(payload.scheduledDate);
     if (!scheduledDate)
         return res.status(400).json({ error: 'Invalid scheduledDate' });
+    const todayKey = new Date().toISOString().slice(0, 10);
+    const scheduledKey = scheduledDate.toISOString().slice(0, 10);
+    if (scheduledKey < todayKey)
+        return res.status(400).json({ error: 'Scheduled date cannot be in the past' });
     const customer = await customersCollection().findOne({ _id: String(payload.customerId || '') });
     if (!customer)
         return res.status(400).json({ error: 'Invalid customerId' });
@@ -296,6 +300,10 @@ app.put('/jobs/:id', authenticate, [(0, express_validator_1.param)('id').isLengt
         const d = parseDate(updates.scheduledDate);
         if (!d)
             return res.status(400).json({ error: 'Invalid scheduledDate' });
+        const todayKey = new Date().toISOString().slice(0, 10);
+        const scheduledKey = d.toISOString().slice(0, 10);
+        if (scheduledKey < todayKey)
+            return res.status(400).json({ error: 'Scheduled date cannot be in the past' });
         updates.scheduledDate = d;
     }
     if (typeof updates.completedDate === 'string') {
