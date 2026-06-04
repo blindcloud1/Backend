@@ -67,6 +67,8 @@ export type BusinessDoc = DbDocBase &
     phone?: string;
     email?: string;
     adminId?: string;
+    parentBusinessId?: string;
+    isSubBusiness?: boolean;
     features: string[];
     subscription: BusinessSubscriptionTier;
     vrViewEnabled: boolean;

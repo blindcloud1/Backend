@@ -207,7 +207,7 @@ app.use(helmet());
 app.post(
   '/public-signup',
   [
-    body('name').isLength({ min: 1 }),
+    body('name').isLength({ min: 1, max: 50 }),
     body('companyName').isLength({ min: 1 }),
     body('email').isEmail().normalizeEmail(),
     body('password').isLength({ min: 8 }),
@@ -882,7 +882,7 @@ app.post(
   requireAdminOrBusiness,
   [
     body('email').isEmail().normalizeEmail(),
-    body('name').isLength({ min: 1 }),
+    body('name').isLength({ min: 1, max: 50 }),
     body('role').isString(),
     body('password').optional().isLength({ min: 8 })
   ],
@@ -1194,7 +1194,7 @@ app.listen(PORT, '0.0.0.0', async () => {
         `Total paid today: ${money(totalFirstPayment)}`,
         '',
         trimmedFeatures.length ? 'Included:' : null,
-        ...trimmedFeatures.map((f) => `- ${f}`),
+        ...trimmedFeatures.map((f: string) => `- ${f}`),
         extraFeaturesCount > 0 ? `- And ${extraFeaturesCount} more` : null,
         '',
         termsUrl ? `Terms & Conditions: ${termsUrl}` : null,
@@ -1254,7 +1254,7 @@ app.listen(PORT, '0.0.0.0', async () => {
                   ? `<div style="margin-top: 14px; border: 1px solid #E5E7EB; border-radius: 12px; padding: 14px 16px;">
                       <div style="font-weight: 800; margin-bottom: 8px;">What’s included</div>
                       <ul style="margin: 0; padding-left: 18px; color: #374151; font-size: 13px;">
-                        ${trimmedFeatures.map((f) => `<li style="margin: 4px 0;">${f}</li>`).join('')}
+                        ${trimmedFeatures.map((f: string) => `<li style="margin: 4px 0;">${f}</li>`).join('')}
                         ${extraFeaturesCount > 0 ? `<li style="margin: 4px 0;">And ${extraFeaturesCount} more</li>` : ''}
                       </ul>
                     </div>`

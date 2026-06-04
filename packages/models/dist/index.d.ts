@@ -41,6 +41,8 @@ export type BusinessDoc = DbDocBase & DbTimestamps & {
     phone?: string;
     email?: string;
     adminId?: string;
+    parentBusinessId?: string;
+    isSubBusiness?: boolean;
     features: string[];
     subscription: BusinessSubscriptionTier;
     vrViewEnabled: boolean;
@@ -173,6 +175,9 @@ export type SubscriptionPlanDoc = DbDocBase & DbTimestamps & {
     name: string;
     description: string;
     price: number;
+    priceOneMonth?: number | null;
+    priceYearly?: number | null;
+    setupFee?: number | null;
     features: string[];
     maxEmployees: number | null;
     maxSubBusinessUsers?: number | null;
@@ -180,6 +185,7 @@ export type SubscriptionPlanDoc = DbDocBase & DbTimestamps & {
     maxEmailsPerMonth?: number | null;
     maxJobs: number | null;
     stripePriceId?: string | null;
+    stripePriceIdYearly?: string | null;
     active: boolean;
 };
 export type UserSubscriptionDoc = DbDocBase & DbTimestamps & {
@@ -193,6 +199,9 @@ export type UserSubscriptionDoc = DbDocBase & DbTimestamps & {
     cancelAtPeriodEnd: boolean;
     grantedByAdmin: boolean;
     grantedBy?: string;
+    setupFeeCharged?: boolean;
+    setupFeeAmount?: number;
+    billingCycle?: 'one_month' | 'monthly' | 'yearly';
 };
 export type PaymentHistoryDoc = DbDocBase & {
     userId: string;
@@ -251,6 +260,7 @@ export type CustomPlanConfigDoc = DbDocBase & DbTimestamps & {
     userPrice: number;
     storagePrice: number;
     bannerDaysBeforeExpiry?: number | null;
+    setupFeeEnabled?: boolean;
 };
 export type FileDoc = DbDocBase & {
     ownerId: string;

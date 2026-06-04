@@ -80,6 +80,18 @@ const canAccessBusiness = (role, currentUser, businessId) => {
         return true;
     return Boolean(currentUser.businessId && currentUser.businessId === businessId);
 };
+const canAccessBusinessOrChild = async (role, currentUser, businessId) => {
+    if (role === 'admin')
+        return true;
+    if (currentUser.businessId && currentUser.businessId === businessId)
+        return true;
+    if (!currentUser.businessId)
+        return false;
+    const business = await businessesCollection().findOne({ _id: businessId }, { projection: { parentBusinessId: 1, isSubBusiness: 1 } });
+    if (!business)
+        return false;
+    return Boolean(business.isSubBusiness && business.parentBusinessId && business.parentBusinessId === currentUser.businessId);
+};
 const escapeRegExp = (value) => {
     return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 };
@@ -106,10 +118,16 @@ app.get('/businesses', authenticate, async (req, res) => {
     }
     if (!currentUser.businessId)
         return res.json([]);
-    const business = await businessesCollection().findOne({ _id: currentUser.businessId });
-    if (!business)
-        return res.json([]);
-    return res.json([{ ...business, createdAt: business.createdAt.toISOString(), updatedAt: business.updatedAt?.toISOString() }]);
+    const items = await businessesCollection()
+        .find({
+        $or: [
+            { _id: currentUser.businessId },
+            { parentBusinessId: currentUser.businessId, isSubBusiness: true }
+        ]
+    })
+        .sort({ createdAt: -1 })
+        .toArray();
+    return res.json(items.map(b => ({ ...b, createdAt: b.createdAt.toISOString(), updatedAt: b.updatedAt?.toISOString() })));
 });
 app.get('/businesses/:id', authenticate, async (req, res) => {
     const role = req.user.role.toLowerCase();
@@ -117,17 +135,21 @@ app.get('/businesses/:id', authenticate, async (req, res) => {
     if (!currentUser)
         return res.status(401).json({ error: 'User not found' });
     const businessId = req.params.id;
-    if (!canAccessBusiness(role, currentUser, businessId))
+    if (!(await canAccessBusinessOrChild(role, currentUser, businessId)))
         return res.status(403).json({ error: 'Insufficient permissions' });
     const business = await businessesCollection().findOne({ _id: businessId });
     if (!business)
         return res.status(404).json({ error: 'Business not found' });
     return res.json({ ...business, createdAt: business.createdAt.toISOString(), updatedAt: business.updatedAt?.toISOString() });
 });
-app.post('/businesses', authenticate, requireAdmin, [(0, express_validator_1.body)('name').isLength({ min: 1 }), (0, express_validator_1.body)('address').optional().isString(), (0, express_validator_1.body)('email').optional().isEmail().normalizeEmail()], async (req, res) => {
+app.post('/businesses', authenticate, requireAdminOrBusiness, [(0, express_validator_1.body)('name').isLength({ min: 1 }), (0, express_validator_1.body)('address').optional().isString(), (0, express_validator_1.body)('email').optional().isEmail().normalizeEmail()], async (req, res) => {
     const errors = (0, express_validator_1.validationResult)(req);
     if (!errors.isEmpty())
         return res.status(400).json({ errors: errors.array() });
+    const role = req.user.role.toLowerCase();
+    const currentUser = await getCurrentUser(req);
+    if (!currentUser)
+        return res.status(401).json({ error: 'User not found' });
     const payload = req.body;
     const normalizedEmail = typeof payload.email === 'string' ? payload.email.trim().toLowerCase() : '';
     if (normalizedEmail) {
@@ -140,21 +162,41 @@ app.post('/businesses', authenticate, requireAdmin, [(0, express_validator_1.bod
             return res.status(409).json({ error: 'Email already exists' });
         }
     }
+    let parentBusinessId = payload.parentBusinessId;
+    let isSubBusiness = payload.isSubBusiness;
+    if (role !== 'admin') {
+        if (!currentUser.businessId)
+            return res.status(400).json({ error: 'businessId is required' });
+        parentBusinessId = currentUser.businessId;
+        isSubBusiness = true;
+    }
+    let inherited = null;
+    if (role !== 'admin' && parentBusinessId) {
+        inherited = await businessesCollection().findOne({ _id: parentBusinessId });
+    }
     const now = new Date();
-    const requestedId = normalizeBusinessId(payload._id) ||
-        normalizeBusinessId(payload.id) ||
-        normalizeBusinessId(payload.businessId);
+    const requestedId = role === 'admin'
+        ? normalizeBusinessId(payload._id) ||
+            normalizeBusinessId(payload.id) ||
+            normalizeBusinessId(payload.businessId)
+        : null;
     const business = {
         _id: requestedId || crypto_1.default.randomUUID(),
         name: String(payload.name || ''),
         address: typeof payload.address === 'string' ? payload.address : '',
         phone: payload.phone,
         email: normalizedEmail || undefined,
-        adminId: payload.adminId,
-        features: Array.isArray(payload.features) ? payload.features : [],
-        subscription: (payload.subscription || 'basic'),
-        vrViewEnabled: Boolean(payload.vrViewEnabled),
+        adminId: role === 'admin' ? payload.adminId : undefined,
+        parentBusinessId: parentBusinessId || undefined,
+        isSubBusiness: Boolean(isSubBusiness),
+        features: role === 'admin' ? (Array.isArray(payload.features) ? payload.features : []) : (Array.isArray(inherited?.features) ? inherited.features : []),
+        subscription: (role === 'admin' ? (payload.subscription || 'basic') : (inherited?.subscription || 'basic')),
+        vrViewEnabled: role === 'admin' ? Boolean(payload.vrViewEnabled) : Boolean(inherited?.vrViewEnabled),
         logo: payload.logo,
+        vatNumber: typeof payload.vatNumber === 'string' ? payload.vatNumber : inherited?.vatNumber,
+        vatPercentage: typeof payload.vatPercentage === 'number' ? payload.vatPercentage : inherited?.vatPercentage,
+        termsAndConditions: typeof payload.termsAndConditions === 'string' ? payload.termsAndConditions : inherited?.termsAndConditions,
+        emailSettings: typeof payload.emailSettings === 'object' && payload.emailSettings ? payload.emailSettings : inherited?.emailSettings,
         createdAt: now,
         updatedAt: now
     };
@@ -177,12 +219,18 @@ app.put('/businesses/:id', authenticate, requireAdminOrBusiness, async (req, res
     if (!currentUser)
         return res.status(401).json({ error: 'User not found' });
     const businessId = req.params.id;
-    if (!canAccessBusiness(role, currentUser, businessId))
+    if (!(await canAccessBusinessOrChild(role, currentUser, businessId)))
         return res.status(403).json({ error: 'Insufficient permissions' });
     const updates = req.body;
     delete updates._id;
     delete updates.createdAt;
     delete updates.adminId;
+    if (role !== 'admin') {
+        delete updates.parentBusinessId;
+        delete updates.isSubBusiness;
+        delete updates.features;
+        delete updates.subscription;
+    }
     updates.updatedAt = new Date();
     if (typeof updates.email === 'string') {
         const normalizedEmail = updates.email.trim().toLowerCase();
