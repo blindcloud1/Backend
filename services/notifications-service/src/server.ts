@@ -6,7 +6,7 @@ import jwt from 'jsonwebtoken';
 import { MongoClient } from 'mongodb';
 import crypto from 'crypto';
 import { EventBus, type CloudEvent } from '@blindscloud/event-bus';
-import type { NotificationDoc, NotificationType, PushSubscriptionDoc, UserDoc, UserRole } from '@blindscloud/models';
+import type { BusinessDoc, NotificationDoc, NotificationType, PushSubscriptionDoc, UserDoc, UserRole } from '@blindscloud/models';
 
 dotenv.config();
 
@@ -33,6 +33,7 @@ const eventBus = new EventBus({
 const notificationsCollection = () => mongo.db('blindscloud').collection<NotificationDoc>('notifications');
 const pushSubscriptionsCollection = () => mongo.db('blindscloud').collection<PushSubscriptionDoc>('push_subscriptions');
 const usersCollection = () => mongo.db('blindscloud').collection<UserDoc>('users');
+const businessesCollection = () => mongo.db('blindscloud').collection<BusinessDoc>('businesses');
 
 const authenticate = (req: AuthRequest, res: Response, next: NextFunction) => {
   const header = req.header('authorization') || req.header('Authorization');
@@ -66,7 +67,15 @@ const getCurrentUser = async (req: AuthRequest): Promise<UserDoc | null> => {
   return usersCollection().findOne({ _id: req.user!.id } as any);
 };
 
-const canNotifyRecipient = (role: string, currentUser: UserDoc, recipient: UserDoc): boolean => {
+const resolveRootBusinessId = async (businessId: string): Promise<string> => {
+  const id = String(businessId || '');
+  if (!id) return '';
+  const business = await businessesCollection().findOne({ _id: id } as any, { projection: { parentBusinessId: 1 } as any } as any);
+  const parentId = business?.parentBusinessId ? String(business.parentBusinessId) : '';
+  return parentId || id;
+};
+
+const canNotifyRecipient = async (role: string, currentUser: UserDoc, recipient: UserDoc): Promise<boolean> => {
   if (role === 'admin') return true;
   if (role === 'employee') {
     const currentBusinessId = String(currentUser.businessId || '');
@@ -74,7 +83,14 @@ const canNotifyRecipient = (role: string, currentUser: UserDoc, recipient: UserD
     const recipientRole = String(recipient.role || '').toLowerCase();
     if (!currentBusinessId) return false;
     if (recipientRole !== 'business') return false;
-    return recipientBusinessId === currentBusinessId;
+    if (!recipientBusinessId) return false;
+
+    const [currentRoot, recipientRoot] = await Promise.all([
+      resolveRootBusinessId(currentBusinessId),
+      resolveRootBusinessId(recipientBusinessId),
+    ]);
+    if (!currentRoot || !recipientRoot) return false;
+    return currentRoot === recipientRoot;
   }
   if (role !== 'business') return false;
 
@@ -152,7 +168,7 @@ app.post(
     const payload = req.body as Partial<NotificationDoc> & { userId: string; title: string; message: string; type?: string };
     const recipient = await usersCollection().findOne({ _id: payload.userId } as any);
     if (!recipient) return res.status(404).json({ error: 'Recipient user not found' });
-    if (!canNotifyRecipient(role, currentUser, recipient)) return res.status(403).json({ error: 'Insufficient permissions' });
+    if (!(await canNotifyRecipient(role, currentUser, recipient))) return res.status(403).json({ error: 'Insufficient permissions' });
 
     const type = payload.type && isValidNotificationType(payload.type) ? (payload.type as NotificationType) : 'system';
 
