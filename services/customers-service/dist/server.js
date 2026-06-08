@@ -149,7 +149,7 @@ app.post('/customers', authenticate, requireAdminOrBusiness, [
     const customer = {
         _id: crypto_1.default.randomUUID(),
         businessId,
-        name: String(payload.name || ''),
+        name: String(payload.name || '').trim(),
         email,
         phone,
         mobile,
@@ -172,6 +172,7 @@ app.post('/customers', authenticate, requireAdminOrBusiness, [
     res.status(201).json({ ...customer, createdAt: customer.createdAt.toISOString(), updatedAt: customer.updatedAt?.toISOString() });
 });
 app.put('/customers/:id', authenticate, requireAdminOrBusiness, [
+    (0, express_validator_1.body)('name').optional().isLength({ min: 1, max: 50 }).withMessage('Name is too long'),
     (0, express_validator_1.body)('email')
         .optional({ checkFalsy: true })
         .custom((value) => EMAIL_REGEX.test(String(value || '').trim()))
@@ -204,6 +205,9 @@ app.put('/customers/:id', authenticate, requireAdminOrBusiness, [
         return res.status(403).json({ error: 'Insufficient permissions' });
     }
     const updates = req.body;
+    if (typeof updates.name === 'string') {
+        updates.name = String(updates.name || '').trim();
+    }
     if (typeof updates.email === 'string') {
         const normalized = String(updates.email || '').trim().toLowerCase();
         if (!normalized) {

@@ -132,7 +132,7 @@ app.get('/products/:id', authenticate, [(0, express_validator_1.param)('id').isL
     res.json(toProductResponse(product));
 });
 app.post('/products', authenticate, requireAdminOrBusiness, [
-    (0, express_validator_1.body)('name').isLength({ min: 1 }),
+    (0, express_validator_1.body)('name').isLength({ min: 1, max: 100 }),
     (0, express_validator_1.body)('category').isLength({ min: 1 }),
     (0, express_validator_1.body)('price').isNumeric(),
     (0, express_validator_1.body)('businessId').optional().isString()
@@ -172,8 +172,8 @@ app.post('/products', authenticate, requireAdminOrBusiness, [
     const product = {
         _id: crypto_1.default.randomUUID(),
         businessId,
-        name: String(payload.name || ''),
-        category: String(payload.category || ''),
+        name: String(payload.name || '').trim(),
+        category: String(payload.category || '').trim(),
         description: String(payload.description || ''),
         image: String(payload.image || ''),
         images: Array.isArray(payload.images) ? payload.images : undefined,
@@ -199,7 +199,11 @@ app.post('/products', authenticate, requireAdminOrBusiness, [
     await eventBus.publish('products.created', event);
     res.status(201).json(toProductResponse(product));
 });
-app.put('/products/:id', authenticate, requireAdminOrBusiness, [(0, express_validator_1.param)('id').isLength({ min: 1 })], async (req, res) => {
+app.put('/products/:id', authenticate, requireAdminOrBusiness, [
+    (0, express_validator_1.param)('id').isLength({ min: 1 }),
+    (0, express_validator_1.body)('name').optional().isLength({ min: 1, max: 100 }),
+    (0, express_validator_1.body)('category').optional().isLength({ min: 1 })
+], async (req, res) => {
     const errors = (0, express_validator_1.validationResult)(req);
     if (!errors.isEmpty())
         return res.status(400).json({ errors: errors.array() });
@@ -216,6 +220,12 @@ app.put('/products/:id', authenticate, requireAdminOrBusiness, [(0, express_vali
     const updates = req.body;
     delete updates._id;
     delete updates.createdAt;
+    if (typeof updates.name === 'string') {
+        updates.name = updates.name.trim();
+    }
+    if (typeof updates.category === 'string') {
+        updates.category = updates.category.trim();
+    }
     if (role !== 'admin') {
         delete updates.businessId;
     }

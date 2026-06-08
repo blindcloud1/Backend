@@ -147,7 +147,7 @@ app.post(
   authenticate,
   requireAdminOrBusiness,
   [
-    body('name').isLength({ min: 1 }),
+    body('name').isLength({ min: 1, max: 100 }),
     body('category').isLength({ min: 1 }),
     body('price').isNumeric(),
     body('businessId').optional().isString()
@@ -189,8 +189,8 @@ app.post(
     const product: ProductDoc = {
       _id: crypto.randomUUID(),
       businessId,
-      name: String(payload.name || ''),
-      category: String(payload.category || ''),
+      name: String(payload.name || '').trim(),
+      category: String(payload.category || '').trim(),
       description: String(payload.description || ''),
       image: String(payload.image || ''),
       images: Array.isArray(payload.images) ? payload.images : undefined,
@@ -221,7 +221,11 @@ app.post(
   }
 );
 
-app.put('/products/:id', authenticate, requireAdminOrBusiness, [param('id').isLength({ min: 1 })], async (req: AuthRequest, res: Response) => {
+app.put('/products/:id', authenticate, requireAdminOrBusiness, [
+  param('id').isLength({ min: 1 }),
+  body('name').optional().isLength({ min: 1, max: 100 }),
+  body('category').optional().isLength({ min: 1 })
+], async (req: AuthRequest, res: Response) => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
 
@@ -237,6 +241,12 @@ app.put('/products/:id', authenticate, requireAdminOrBusiness, [param('id').isLe
   const updates = req.body as Partial<ProductDoc>;
   delete (updates as any)._id;
   delete (updates as any).createdAt;
+  if (typeof updates.name === 'string') {
+    updates.name = updates.name.trim();
+  }
+  if (typeof updates.category === 'string') {
+    updates.category = updates.category.trim();
+  }
   if (role !== 'admin') {
     delete (updates as any).businessId;
   }

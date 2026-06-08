@@ -161,7 +161,7 @@ app.post(
     const customer: CustomerDoc = {
       _id: crypto.randomUUID(),
       businessId,
-      name: String(payload.name || ''),
+      name: String(payload.name || '').trim(),
       email,
       phone,
       mobile,
@@ -192,6 +192,7 @@ app.put(
   authenticate,
   requireAdminOrBusiness,
   [
+    body('name').optional().isLength({ min: 1, max: 50 }).withMessage('Name is too long'),
     body('email')
       .optional({ checkFalsy: true })
       .custom((value) => EMAIL_REGEX.test(String(value || '').trim()))
@@ -225,6 +226,9 @@ app.put(
   }
 
   const updates = req.body as Partial<CustomerDoc>;
+  if (typeof (updates as any).name === 'string') {
+    (updates as any).name = String((updates as any).name || '').trim();
+  }
   if (typeof (updates as any).email === 'string') {
     const normalized = String((updates as any).email || '').trim().toLowerCase();
     if (!normalized) {
