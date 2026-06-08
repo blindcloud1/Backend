@@ -286,7 +286,15 @@ app.get('/jobs', authenticate, async (req: AuthRequest, res: Response) => {
     });
     // #endregion
 
-    const response = jobs.map(toJobResponse);
+    const response = jobs.map((job, index) => {
+      try {
+        return toJobResponse(job);
+      } catch (err: any) {
+        throw new Error(
+          `Failed to serialize job at index ${index} with id ${job?._id || 'unknown'}: ${err?.message || String(err)}`
+        );
+      }
+    });
     // #region debug-point A:jobs-success
     await reportDebug('A', 'jobs-service:/jobs:success', '[DEBUG] /jobs response serialized', {
       traceId,
@@ -303,7 +311,11 @@ app.get('/jobs', authenticate, async (req: AuthRequest, res: Response) => {
       errorStack: err?.stack || null
     });
     // #endregion
-    return res.status(500).json({ error: 'Jobs endpoint failed', traceId });
+    return res.status(500).json({
+      error: 'Jobs endpoint failed',
+      traceId,
+      details: import.meta.env?.DEV ? (err?.message || String(err)) : undefined
+    });
   }
 });
 
