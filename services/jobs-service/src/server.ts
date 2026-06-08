@@ -5,6 +5,7 @@ import { body, param, validationResult } from 'express-validator';
 import jwt from 'jsonwebtoken';
 import { MongoClient } from 'mongodb';
 import crypto from 'crypto';
+import fs from 'fs';
 import { EventBus, type CloudEvent } from '@blindscloud/event-bus';
 import type {
   CustomerDoc,
@@ -156,6 +157,51 @@ const getMaxJobsForPeriod = (plan: SubscriptionPlanDoc, sub: UserSubscriptionDoc
   return Math.max(0, Math.floor(n * multiplier));
 };
 
+const DEBUG_ENV_PATH = '.dbg/jobs-504-timeout.env';
+const DEBUG_DEFAULT_URL = 'http://127.0.0.1:7777/event';
+const DEBUG_DEFAULT_SESSION_ID = 'jobs-504-timeout';
+
+const readDebugConfig = () => {
+  let url = process.env.DEBUG_SERVER_URL || DEBUG_DEFAULT_URL;
+  let sessionId = process.env.DEBUG_SESSION_ID || DEBUG_DEFAULT_SESSION_ID;
+  try {
+    const raw = fs.readFileSync(DEBUG_ENV_PATH, 'utf8');
+    const envUrl = raw.match(/^DEBUG_SERVER_URL=(.+)$/m)?.[1]?.trim();
+    const envSessionId = raw.match(/^DEBUG_SESSION_ID=(.+)$/m)?.[1]?.trim();
+    if (envUrl) url = envUrl;
+    if (envSessionId) sessionId = envSessionId;
+  } catch {
+    void 0;
+  }
+  return { url, sessionId };
+};
+
+const reportDebug = async (
+  hypothesisId: 'A' | 'B' | 'C' | 'D' | 'E',
+  location: string,
+  msg: string,
+  data: Record<string, unknown>
+) => {
+  const { url, sessionId } = readDebugConfig();
+  try {
+    await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        sessionId,
+        runId: 'pre-fix',
+        hypothesisId,
+        location,
+        msg,
+        data,
+        ts: Date.now()
+      })
+    });
+  } catch {
+    void 0;
+  }
+};
+
 const app = express();
 app.use(express.json({ limit: '4mb' }));
 app.use(helmet());
@@ -170,22 +216,82 @@ app.get('/health', async (_req: Request, res: Response) => {
 });
 
 app.get('/jobs', authenticate, async (req: AuthRequest, res: Response) => {
-  const role = req.user!.role.toLowerCase();
-  const currentUser = await getCurrentUser(req);
-  if (!currentUser) return res.status(401).json({ error: 'User not found' });
+  const traceId = crypto.randomUUID();
+  try {
+    const role = req.user!.role.toLowerCase();
+    // #region debug-point A:jobs-entry
+    await reportDebug('A', 'jobs-service:/jobs:entry', '[DEBUG] /jobs request started', {
+      traceId,
+      userId: req.user?.id,
+      role,
+      queryBusinessId: typeof req.query.businessId === 'string' ? req.query.businessId : null
+    });
+    // #endregion
 
-  const filter: any = {};
-  if (role !== 'admin') {
-    filter.businessId = currentUser.businessId;
-    if (role === 'employee') {
-      filter.$or = [{ employeeId: currentUser._id }, { employeeId: { $exists: false } }, { employeeId: null }];
+    const currentUser = await getCurrentUser(req);
+    // #region debug-point D:user-lookup
+    await reportDebug('D', 'jobs-service:/jobs:user-lookup', '[DEBUG] /jobs current user lookup finished', {
+      traceId,
+      foundUser: Boolean(currentUser),
+      currentUserId: currentUser?._id || null,
+      currentUserBusinessId: currentUser?.businessId || null
+    });
+    // #endregion
+    if (!currentUser) return res.status(401).json({ error: 'User not found', traceId });
+
+    const filter: any = {};
+    if (role !== 'admin') {
+      filter.businessId = currentUser.businessId;
+      if (role === 'employee') {
+        filter.$or = [{ employeeId: currentUser._id }, { employeeId: { $exists: false } }, { employeeId: null }];
+      }
+    } else if (req.query.businessId && typeof req.query.businessId === 'string') {
+      filter.businessId = req.query.businessId;
     }
-  } else if (req.query.businessId && typeof req.query.businessId === 'string') {
-    filter.businessId = req.query.businessId;
-  }
 
-  const jobs = await jobsCollection().find(filter).sort({ scheduledDate: -1 }).toArray();
-  res.json(jobs.map(toJobResponse));
+    const jobs = await jobsCollection().find(filter).sort({ scheduledDate: -1 }).toArray();
+    const suspiciousJobs = jobs
+      .filter((job) =>
+        !(job.createdAt instanceof Date) ||
+        !(job.scheduledDate instanceof Date) ||
+        (job.completedDate != null && !(job.completedDate instanceof Date))
+      )
+      .slice(0, 10)
+      .map((job) => ({
+        id: job._id,
+        createdAtType: job.createdAt == null ? 'nullish' : typeof job.createdAt,
+        scheduledDateType: job.scheduledDate == null ? 'nullish' : typeof job.scheduledDate,
+        completedDateType: job.completedDate == null ? 'nullish' : typeof job.completedDate
+      }));
+
+    // #region debug-point B:jobs-query
+    await reportDebug('B', 'jobs-service:/jobs:query', '[DEBUG] /jobs query completed', {
+      traceId,
+      filter,
+      jobCount: jobs.length,
+      suspiciousJobs
+    });
+    // #endregion
+
+    const response = jobs.map(toJobResponse);
+    // #region debug-point A:jobs-success
+    await reportDebug('A', 'jobs-service:/jobs:success', '[DEBUG] /jobs response serialized', {
+      traceId,
+      responseCount: response.length
+    });
+    // #endregion
+    return res.json(response);
+  } catch (err: any) {
+    // #region debug-point A:jobs-error
+    await reportDebug('A', 'jobs-service:/jobs:error', '[DEBUG] /jobs request failed', {
+      traceId,
+      errorName: err?.name || null,
+      errorMessage: err?.message || String(err),
+      errorStack: err?.stack || null
+    });
+    // #endregion
+    return res.status(500).json({ error: 'Jobs endpoint failed', traceId });
+  }
 });
 
 app.get('/jobs/:id', authenticate, [param('id').isLength({ min: 1 })], async (req: AuthRequest, res: Response) => {
