@@ -314,7 +314,7 @@ app.get('/jobs', authenticate, async (req: AuthRequest, res: Response) => {
     return res.status(500).json({
       error: 'Jobs endpoint failed',
       traceId,
-      details: import.meta.env?.DEV ? (err?.message || String(err)) : undefined
+      details: err?.message || String(err)
     });
   }
 });
