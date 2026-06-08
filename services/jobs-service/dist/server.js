@@ -70,22 +70,34 @@ const canAccessJob = (role, currentUser, job) => {
         return true;
     return job.employeeId ? job.employeeId === currentUser._id : true;
 };
+const toIsoDateString = (value) => {
+    if (value instanceof Date && !Number.isNaN(value.getTime())) {
+        return value.toISOString();
+    }
+    if (typeof value === 'string' && value.trim()) {
+        const parsed = new Date(value);
+        if (!Number.isNaN(parsed.getTime())) {
+            return parsed.toISOString();
+        }
+    }
+    return '';
+};
 const toJobResponse = (job) => ({
     ...job,
-    createdAt: job.createdAt.toISOString(),
-    updatedAt: job.updatedAt?.toISOString(),
-    scheduledDate: job.scheduledDate.toISOString(),
-    completedDate: job.completedDate?.toISOString()
+    createdAt: toIsoDateString(job.createdAt),
+    updatedAt: toIsoDateString(job.updatedAt),
+    scheduledDate: toIsoDateString(job.scheduledDate),
+    completedDate: toIsoDateString(job.completedDate)
 });
 const toMeasurementResponse = (m) => ({
     ...m,
-    createdAt: m.createdAt.toISOString(),
-    updatedAt: m.updatedAt?.toISOString()
+    createdAt: toIsoDateString(m.createdAt),
+    updatedAt: toIsoDateString(m.updatedAt)
 });
 const toImageResponse = (img) => ({
     ...img,
-    createdAt: img.createdAt.toISOString(),
-    updatedAt: img.updatedAt?.toISOString()
+    createdAt: toIsoDateString(img.createdAt),
+    updatedAt: toIsoDateString(img.updatedAt)
 });
 const parseDate = (value) => {
     if (typeof value !== 'string')
