@@ -56,6 +56,15 @@ const requireAdminOrBusiness = (req, res, next) => {
 const getCurrentUser = async (req) => {
     return usersCollection().findOne({ _id: req.user.id });
 };
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+const POSTCODE_REGEX = /^[A-Za-z0-9 -]{3,20}$/;
+const countDigits = (value) => (String(value || '').match(/\d/g) || []).length;
+const isValidPhone = (value) => {
+    const trimmed = String(value || '').trim();
+    if (!trimmed)
+        return true;
+    return /^[\d\s()+-]+$/.test(trimmed) && countDigits(trimmed) >= 7 && countDigits(trimmed) <= 15;
+};
 const app = (0, express_1.default)();
 app.use(express_1.default.json({ limit: '2mb' }));
 app.use((0, helmet_1.default)());
@@ -99,8 +108,22 @@ app.get('/customers/:id', authenticate, async (req, res) => {
 app.post('/customers', authenticate, requireAdminOrBusiness, [
     (0, express_validator_1.body)('name').isLength({ min: 1, max: 50 }),
     (0, express_validator_1.body)('address').isLength({ min: 1 }),
-    (0, express_validator_1.body)('email').optional({ checkFalsy: true }).isEmail().normalizeEmail(),
-    (0, express_validator_1.body)('postcode').optional({ checkFalsy: true }).matches(/^\d+$/)
+    (0, express_validator_1.body)('email')
+        .optional({ checkFalsy: true })
+        .custom((value) => EMAIL_REGEX.test(String(value || '').trim()))
+        .withMessage('Please enter a valid email address'),
+    (0, express_validator_1.body)('phone')
+        .optional({ checkFalsy: true })
+        .custom((value) => isValidPhone(String(value || '')))
+        .withMessage('Please enter a valid phone number'),
+    (0, express_validator_1.body)('mobile')
+        .optional({ checkFalsy: true })
+        .custom((value) => isValidPhone(String(value || '')))
+        .withMessage('Please enter a valid phone number'),
+    (0, express_validator_1.body)('postcode')
+        .optional({ checkFalsy: true })
+        .custom((value) => POSTCODE_REGEX.test(String(value || '').trim()))
+        .withMessage('Please enter a valid postcode')
 ], async (req, res) => {
     const errors = (0, express_validator_1.validationResult)(req);
     if (!errors.isEmpty())
@@ -120,15 +143,18 @@ app.post('/customers', authenticate, requireAdminOrBusiness, [
         if (normalized)
             email = normalized;
     }
+    const phone = typeof payload.phone === 'string' ? payload.phone.trim() : undefined;
+    const mobile = typeof payload.mobile === 'string' ? payload.mobile.trim() : undefined;
+    const postcode = typeof payload.postcode === 'string' ? payload.postcode.trim() : undefined;
     const customer = {
         _id: crypto_1.default.randomUUID(),
         businessId,
         name: String(payload.name || ''),
         email,
-        phone: payload.phone,
-        mobile: payload.mobile,
+        phone,
+        mobile,
         address: String(payload.address || ''),
-        postcode: payload.postcode,
+        postcode,
         createdAt: now,
         updatedAt: now
     };
@@ -145,7 +171,24 @@ app.post('/customers', authenticate, requireAdminOrBusiness, [
     await eventBus.publish('customers.created', event);
     res.status(201).json({ ...customer, createdAt: customer.createdAt.toISOString(), updatedAt: customer.updatedAt?.toISOString() });
 });
-app.put('/customers/:id', authenticate, requireAdminOrBusiness, [(0, express_validator_1.body)('email').optional({ checkFalsy: true }).isEmail().normalizeEmail(), (0, express_validator_1.body)('postcode').optional({ checkFalsy: true }).matches(/^\d+$/)], async (req, res) => {
+app.put('/customers/:id', authenticate, requireAdminOrBusiness, [
+    (0, express_validator_1.body)('email')
+        .optional({ checkFalsy: true })
+        .custom((value) => EMAIL_REGEX.test(String(value || '').trim()))
+        .withMessage('Please enter a valid email address'),
+    (0, express_validator_1.body)('phone')
+        .optional({ checkFalsy: true })
+        .custom((value) => isValidPhone(String(value || '')))
+        .withMessage('Please enter a valid phone number'),
+    (0, express_validator_1.body)('mobile')
+        .optional({ checkFalsy: true })
+        .custom((value) => isValidPhone(String(value || '')))
+        .withMessage('Please enter a valid phone number'),
+    (0, express_validator_1.body)('postcode')
+        .optional({ checkFalsy: true })
+        .custom((value) => POSTCODE_REGEX.test(String(value || '').trim()))
+        .withMessage('Please enter a valid postcode')
+], async (req, res) => {
     const errors = (0, express_validator_1.validationResult)(req);
     if (!errors.isEmpty())
         return res.status(400).json({ errors: errors.array() });
@@ -177,6 +220,24 @@ app.put('/customers/:id', authenticate, requireAdminOrBusiness, [(0, express_val
         }
         else {
             updates.postcode = normalized;
+        }
+    }
+    if (typeof updates.phone === 'string') {
+        const normalized = String(updates.phone || '').trim();
+        if (!normalized) {
+            delete updates.phone;
+        }
+        else {
+            updates.phone = normalized;
+        }
+    }
+    if (typeof updates.mobile === 'string') {
+        const normalized = String(updates.mobile || '').trim();
+        if (!normalized) {
+            delete updates.mobile;
+        }
+        else {
+            updates.mobile = normalized;
         }
     }
     delete updates._id;

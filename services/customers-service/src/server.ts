@@ -59,6 +59,15 @@ const getCurrentUser = async (req: AuthRequest): Promise<UserDoc | null> => {
   return usersCollection().findOne({ _id: req.user!.id } as any);
 };
 
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+const POSTCODE_REGEX = /^[A-Za-z0-9 -]{3,20}$/;
+const countDigits = (value: string) => (String(value || '').match(/\d/g) || []).length;
+const isValidPhone = (value: string) => {
+  const trimmed = String(value || '').trim();
+  if (!trimmed) return true;
+  return /^[\d\s()+-]+$/.test(trimmed) && countDigits(trimmed) >= 7 && countDigits(trimmed) <= 15;
+};
+
 const app = express();
 app.use(express.json({ limit: '2mb' }));
 app.use(helmet());
@@ -110,8 +119,22 @@ app.post(
   [
     body('name').isLength({ min: 1, max: 50 }),
     body('address').isLength({ min: 1 }),
-    body('email').optional({ checkFalsy: true }).isEmail().normalizeEmail(),
-    body('postcode').optional({ checkFalsy: true }).matches(/^\d+$/)
+    body('email')
+      .optional({ checkFalsy: true })
+      .custom((value) => EMAIL_REGEX.test(String(value || '').trim()))
+      .withMessage('Please enter a valid email address'),
+    body('phone')
+      .optional({ checkFalsy: true })
+      .custom((value) => isValidPhone(String(value || '')))
+      .withMessage('Please enter a valid phone number'),
+    body('mobile')
+      .optional({ checkFalsy: true })
+      .custom((value) => isValidPhone(String(value || '')))
+      .withMessage('Please enter a valid phone number'),
+    body('postcode')
+      .optional({ checkFalsy: true })
+      .custom((value) => POSTCODE_REGEX.test(String(value || '').trim()))
+      .withMessage('Please enter a valid postcode')
   ],
   async (req: AuthRequest, res: Response) => {
     const errors = validationResult(req);
@@ -131,16 +154,19 @@ app.post(
       const normalized = payload.email.trim().toLowerCase();
       if (normalized) email = normalized;
     }
+    const phone = typeof payload.phone === 'string' ? payload.phone.trim() : undefined;
+    const mobile = typeof payload.mobile === 'string' ? payload.mobile.trim() : undefined;
+    const postcode = typeof payload.postcode === 'string' ? payload.postcode.trim() : undefined;
 
     const customer: CustomerDoc = {
       _id: crypto.randomUUID(),
       businessId,
       name: String(payload.name || ''),
       email,
-      phone: payload.phone,
-      mobile: payload.mobile,
+      phone,
+      mobile,
       address: String(payload.address || ''),
-      postcode: payload.postcode,
+      postcode,
       createdAt: now,
       updatedAt: now
     };
@@ -165,7 +191,24 @@ app.put(
   '/customers/:id',
   authenticate,
   requireAdminOrBusiness,
-  [body('email').optional({ checkFalsy: true }).isEmail().normalizeEmail(), body('postcode').optional({ checkFalsy: true }).matches(/^\d+$/)],
+  [
+    body('email')
+      .optional({ checkFalsy: true })
+      .custom((value) => EMAIL_REGEX.test(String(value || '').trim()))
+      .withMessage('Please enter a valid email address'),
+    body('phone')
+      .optional({ checkFalsy: true })
+      .custom((value) => isValidPhone(String(value || '')))
+      .withMessage('Please enter a valid phone number'),
+    body('mobile')
+      .optional({ checkFalsy: true })
+      .custom((value) => isValidPhone(String(value || '')))
+      .withMessage('Please enter a valid phone number'),
+    body('postcode')
+      .optional({ checkFalsy: true })
+      .custom((value) => POSTCODE_REGEX.test(String(value || '').trim()))
+      .withMessage('Please enter a valid postcode')
+  ],
   async (req: AuthRequest, res: Response) => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
@@ -196,6 +239,22 @@ app.put(
       delete (updates as any).postcode;
     } else {
       (updates as any).postcode = normalized;
+    }
+  }
+  if (typeof (updates as any).phone === 'string') {
+    const normalized = String((updates as any).phone || '').trim();
+    if (!normalized) {
+      delete (updates as any).phone;
+    } else {
+      (updates as any).phone = normalized;
+    }
+  }
+  if (typeof (updates as any).mobile === 'string') {
+    const normalized = String((updates as any).mobile || '').trim();
+    if (!normalized) {
+      delete (updates as any).mobile;
+    } else {
+      (updates as any).mobile = normalized;
     }
   }
   delete (updates as any)._id;
