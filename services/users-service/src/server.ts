@@ -872,6 +872,8 @@ app.get('/users', authenticate, async (req: AuthRequest, res: Response) => {
     permissions: u.permissions,
     isActive: u.isActive,
     emailVerified: u.emailVerified,
+    workingHours: u.workingHours,
+    schedulingPreferences: u.schedulingPreferences,
     createdAt: u.createdAt.toISOString()
   })));
 });

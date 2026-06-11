@@ -55,6 +55,11 @@ export type UserDoc = DbDocBase &
     emailVerified: boolean;
     verificationToken?: string;
     address?: string;
+    workingHours?: Record<string, unknown>;
+    schedulingPreferences?: {
+      autoBookingEnabled?: boolean;
+      schedulingMode?: 'auto' | 'manual';
+    };
     createdBy?: string;
     lastLoginAt?: Date;
     lastLogoutAt?: Date;
