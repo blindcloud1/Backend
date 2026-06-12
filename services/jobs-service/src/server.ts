@@ -475,7 +475,7 @@ app.put('/jobs/:id', authenticate, [param('id').isLength({ min: 1 })], async (re
     const canAcceptJobs = Array.isArray(currentUser.permissions) && currentUser.permissions.includes(EMPLOYEE_ACCEPT_JOBS_PERMISSION);
     const nextStatus = typeof updates.status === 'string' ? updates.status.toLowerCase() : '';
     const isAssignmentResponse =
-      nextStatus === 'in-progress' ||
+      nextStatus === 'confirmed' ||
       nextStatus === 'pending' ||
       nextStatus === 'cancelled' ||
       Object.prototype.hasOwnProperty.call(updates, 'employeeId');

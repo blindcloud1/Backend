@@ -6,6 +6,7 @@ export type BusinessSubscriptionTier = 'basic' | 'premium' | 'enterprise';
 export type BusinessSize = 'small' | 'medium' | 'large';
 export type JobStatus =
   | 'pending'
+  | 'assigned'
   | 'confirmed'
   | 'in-progress'
   | 'completed'

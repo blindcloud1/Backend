@@ -24,6 +24,8 @@ if (!MONGO_URL)
     throw new Error('MONGO_URL is required');
 if (!RABBITMQ_URL)
     throw new Error('RABBITMQ_URL is required');
+const EMPLOYEE_ACCEPT_JOBS_PERMISSION = 'employee_accept_jobs';
+const EMPLOYEE_ASSIGNMENT_PERMISSION = 'employee_be_assigned_jobs';
 const mongo = new mongodb_1.MongoClient(MONGO_URL);
 const eventBus = new event_bus_1.EventBus({
     url: RABBITMQ_URL,
@@ -68,7 +70,11 @@ const canAccessJob = (role, currentUser, job) => {
         return false;
     if (role === 'business')
         return true;
-    return job.employeeId ? job.employeeId === currentUser._id : true;
+    if (job.employeeId) {
+        const canBeAssigned = Array.isArray(currentUser.permissions) && currentUser.permissions.includes(EMPLOYEE_ASSIGNMENT_PERMISSION);
+        return job.employeeId === currentUser._id && canBeAssigned;
+    }
+    return true;
 };
 const toIsoDateString = (value) => {
     if (value instanceof Date && !Number.isNaN(value.getTime())) {
@@ -230,7 +236,14 @@ app.get('/jobs', authenticate, async (req, res) => {
         if (role !== 'admin') {
             filter.businessId = currentUser.businessId;
             if (role === 'employee') {
-                filter.$or = [{ employeeId: currentUser._id }, { employeeId: { $exists: false } }, { employeeId: null }];
+                const canBeAssigned = Array.isArray(currentUser.permissions) && currentUser.permissions.includes(EMPLOYEE_ASSIGNMENT_PERMISSION);
+                filter.$or = [
+                    { employeeId: { $exists: false } },
+                    { employeeId: null }
+                ];
+                if (canBeAssigned) {
+                    filter.$or.unshift({ employeeId: currentUser._id });
+                }
             }
         }
         else if (req.query.businessId && typeof req.query.businessId === 'string') {
@@ -417,6 +430,30 @@ app.put('/jobs/:id', authenticate, [(0, express_validator_1.param)('id').isLengt
     delete updates.createdAt;
     delete updates.businessId;
     delete updates.customerId;
+    if (role === 'employee') {
+        const canAcceptJobs = Array.isArray(currentUser.permissions) && currentUser.permissions.includes(EMPLOYEE_ACCEPT_JOBS_PERMISSION);
+        const nextStatus = typeof updates.status === 'string' ? updates.status.toLowerCase() : '';
+        const isAssignmentResponse = nextStatus === 'confirmed' ||
+            nextStatus === 'pending' ||
+            nextStatus === 'cancelled' ||
+            Object.prototype.hasOwnProperty.call(updates, 'employeeId');
+        if (isAssignmentResponse && !canAcceptJobs) {
+            return res.status(403).json({ error: 'This employee is not allowed to accept or cancel jobs' });
+        }
+    }
+    if ((role === 'admin' || role === 'business') && typeof updates.employeeId === 'string' && updates.employeeId.trim()) {
+        const targetEmployee = await usersCollection().findOne({ _id: updates.employeeId.trim() });
+        if (!targetEmployee) {
+            return res.status(400).json({ error: 'Assigned employee not found' });
+        }
+        if (String(targetEmployee.role || '').toLowerCase() !== 'employee' || targetEmployee.businessId !== existing.businessId) {
+            return res.status(400).json({ error: 'Assigned user must be an employee in this business' });
+        }
+        const canReceiveAssignments = Array.isArray(targetEmployee.permissions) && targetEmployee.permissions.includes(EMPLOYEE_ASSIGNMENT_PERMISSION);
+        if (!canReceiveAssignments) {
+            return res.status(403).json({ error: 'This employee is not available for assignment' });
+        }
+    }
     if (typeof updates.scheduledDate === 'string') {
         const d = parseDate(updates.scheduledDate);
         if (!d)

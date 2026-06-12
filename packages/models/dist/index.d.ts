@@ -3,7 +3,7 @@ export type IsoDateString = string;
 export type UserRole = 'admin' | 'business' | 'employee' | 'merchant';
 export type BusinessSubscriptionTier = 'basic' | 'premium' | 'enterprise';
 export type BusinessSize = 'small' | 'medium' | 'large';
-export type JobStatus = 'pending' | 'confirmed' | 'in-progress' | 'completed' | 'cancelled' | 'tbd' | 'awaiting-deposit' | 'awaiting-payment';
+export type JobStatus = 'pending' | 'assigned' | 'confirmed' | 'in-progress' | 'completed' | 'cancelled' | 'tbd' | 'awaiting-deposit' | 'awaiting-payment';
 export type OrderUnit = 'cm' | 'inch' | 'mm';
 export type OrderStatus = 'pending' | 'accepted' | 'ready' | 'delivered' | 'cancelled';
 export type NotificationType = 'reminder' | 'job' | 'system' | 'job_assigned' | 'job_accepted' | 'job_cancelled' | 'job_completed' | 'quotation_sent' | 'receipt_sent' | 'followup_sent' | 'order_status';
@@ -31,6 +31,11 @@ export type UserDoc = DbDocBase & DbTimestamps & {
     emailVerified: boolean;
     verificationToken?: string;
     address?: string;
+    workingHours?: Record<string, unknown>;
+    schedulingPreferences?: {
+        autoBookingEnabled?: boolean;
+        schedulingMode?: 'auto' | 'manual';
+    };
     createdBy?: string;
     lastLoginAt?: Date;
     lastLogoutAt?: Date;
