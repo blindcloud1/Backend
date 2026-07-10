@@ -34,6 +34,10 @@ services:
       RABBITMQ_URL: ${RABBITMQ_URL:-amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-change-me}@rabbitmq:5672}
       EVENT_EXCHANGE: ${EVENT_EXCHANGE:-blindscloud.events}
       SEED_DEMO: ${SEED_DEMO:-true}
+      FRONTEND_URL: ${FRONTEND_URL:-}
+      SENDGRID_API_KEY: ${SENDGRID_API_KEY:-}
+      SENDGRID_FROM_EMAIL: ${SENDGRID_FROM_EMAIL:-noreply@blindscloud.co.uk}
+      SENDGRID_FROM_NAME: ${SENDGRID_FROM_NAME:-BlindsCloud}
     depends_on:
       - mongo
       - rabbitmq
