@@ -181,6 +181,63 @@ app.use(createProxyMiddleware({
   pathRewrite: { '^/api/billing/health': '/health' }
 }));
 
+app.get('/api/billing/public/custom-plan-config', async (req: Request, res: Response) => {
+  const billingBaseUrl = BILLING_SERVICE_URL.replace(/\/+$/, '');
+  const correlationId = req.headers['x-correlation-id'];
+  const authHeader = req.header('authorization') || req.header('Authorization');
+
+  try {
+    const publicHeaders: Record<string, string> = {};
+    if (correlationId && typeof correlationId === 'string') {
+      publicHeaders['x-correlation-id'] = correlationId;
+    }
+
+    const publicUpstream = await fetch(`${billingBaseUrl}/public/custom-plan-config`, {
+      headers: publicHeaders
+    });
+
+    if (publicUpstream.ok) {
+      const text = await publicUpstream.text();
+      const contentType = publicUpstream.headers.get('content-type');
+      if (contentType) res.setHeader('content-type', contentType);
+      return res.status(publicUpstream.status).send(text);
+    }
+
+    if (publicUpstream.status !== 404) {
+      const text = await publicUpstream.text();
+      const contentType = publicUpstream.headers.get('content-type');
+      if (contentType) res.setHeader('content-type', contentType);
+      return res.status(publicUpstream.status).send(text);
+    }
+
+    if (!authHeader) {
+      return res.json(null);
+    }
+
+    const legacyHeaders: Record<string, string> = {
+      Authorization: authHeader
+    };
+    if (correlationId && typeof correlationId === 'string') {
+      legacyHeaders['x-correlation-id'] = correlationId;
+    }
+
+    const legacyUpstream = await fetch(`${billingBaseUrl}/custom-plan-config`, {
+      headers: legacyHeaders
+    });
+
+    if (legacyUpstream.status === 401 || legacyUpstream.status === 403 || legacyUpstream.status === 404) {
+      return res.json(null);
+    }
+
+    const legacyText = await legacyUpstream.text();
+    const legacyContentType = legacyUpstream.headers.get('content-type');
+    if (legacyContentType) res.setHeader('content-type', legacyContentType);
+    return res.status(legacyUpstream.status).send(legacyText);
+  } catch (err: any) {
+    return res.status(502).json({ error: err?.message || 'Upstream error' });
+  }
+});
+
 app.use(createProxyMiddleware({
   target: NOTIFICATIONS_SERVICE_URL,
   changeOrigin: true,
