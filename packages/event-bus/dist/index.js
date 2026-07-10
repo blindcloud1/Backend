@@ -45,9 +45,29 @@ class EventBus {
     async connect() {
         if (this.connection && this.channel)
             return;
-        this.connection = await amqp.connect(this.config.url);
-        this.channel = await this.connection.createChannel();
-        await this.channel.assertExchange(this.config.exchange, 'topic', { durable: true });
+        const maxRetries = Math.max(1, this.config.maxRetries ?? 30);
+        const retryDelayMs = Math.max(250, this.config.retryDelayMs ?? 2000);
+        let lastError;
+        for (let attempt = 1; attempt <= maxRetries; attempt += 1) {
+            try {
+                this.connection = await amqp.connect(this.config.url);
+                this.channel = await this.connection.createChannel();
+                await this.channel.assertExchange(this.config.exchange, 'topic', { durable: true });
+                return;
+            }
+            catch (error) {
+                lastError = error;
+                this.channel = null;
+                this.connection = null;
+                if (attempt >= maxRetries) {
+                    break;
+                }
+                await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
+            }
+        }
+        throw lastError instanceof Error
+            ? lastError
+            : new Error(`Failed to connect event bus for ${this.config.serviceName}`);
     }
     async publish(routingKey, event) {
         if (!this.channel)

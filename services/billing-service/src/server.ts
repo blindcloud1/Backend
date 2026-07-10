@@ -147,6 +147,12 @@ app.get('/public/terms-and-conditions', async (_req: Request, res: Response) => 
   });
 });
 
+app.get('/public/custom-plan-config', async (_req: Request, res: Response) => {
+  const config = await customConfigCollection().findOne({} as any);
+  if (!config) return res.json(null);
+  res.json(toConfigResponse(config));
+});
+
 app.get('/terms-and-conditions', authenticate, async (_req: AuthRequest, res: Response) => {
   const doc = await platformSettingsCollection().findOne({ _id: 'subscription_terms' } as any);
   res.json({

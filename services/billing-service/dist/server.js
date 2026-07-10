@@ -125,6 +125,12 @@ app.get('/public/terms-and-conditions', async (_req, res) => {
         updatedAt: doc?.updatedAt?.toISOString?.() || null
     });
 });
+app.get('/public/custom-plan-config', async (_req, res) => {
+    const config = await customConfigCollection().findOne({});
+    if (!config)
+        return res.json(null);
+    res.json(toConfigResponse(config));
+});
 app.get('/terms-and-conditions', authenticate, async (_req, res) => {
     const doc = await platformSettingsCollection().findOne({ _id: 'subscription_terms' });
     res.json({
@@ -321,8 +327,8 @@ app.post('/stripe/checkout-session', authenticate, [(0, express_validator_1.body
         : (await stripe.customers.create({ email: currentUser.email, metadata: { userId: currentUser._id } })).id;
     const frontendBase = getFrontendBaseUrl(req);
     const termsUrl = `${frontendBase}/terms-and-conditions`;
-    const successUrl = `${frontendBase}/`;
-    const cancelUrl = `${frontendBase}/`;
+    const successUrl = `${frontendBase}/?stripeCheckout=success&session_id={CHECKOUT_SESSION_ID}`;
+    const cancelUrl = `${frontendBase}/?stripeCheckout=cancel`;
     const commonMetadata = {
         userId: req.user.id,
         planId: String(planId),
@@ -397,24 +403,7 @@ app.post('/stripe/checkout-session', authenticate, [(0, express_validator_1.body
         });
     res.json({ url: session.url });
 });
-app.post('/stripe/webhook', async (req, res) => {
-    if (!stripe || !STRIPE_WEBHOOK_SECRET) {
-        return res.status(500).send('Stripe webhook not configured');
-    }
-    const sig = req.header('stripe-signature');
-    if (!sig)
-        return res.status(400).send('Missing stripe-signature');
-    let event;
-    try {
-        event = stripe.webhooks.constructEvent(req.rawBody, sig, STRIPE_WEBHOOK_SECRET);
-    }
-    catch (err) {
-        return res.status(400).send(`Webhook Error: ${err?.message || String(err)}`);
-    }
-    if (event.type !== 'checkout.session.completed') {
-        return res.json({ received: true });
-    }
-    const session = event.data.object;
+const processCheckoutSessionCompleted = async (session, req, opts) => {
     const userId = String((session.metadata || {}).userId || '');
     const planId = String((session.metadata || {}).planId || '');
     const billingCycleRaw = String((session.metadata || {}).billingCycle || '');
@@ -424,24 +413,29 @@ app.post('/stripe/webhook', async (req, res) => {
     const setupFeeCharged = String((session.metadata || {}).setupFeeCharged || '').toLowerCase() === 'true';
     const setupFeeAmount = Number((session.metadata || {}).setupFeeAmount || 0) || 0;
     const termsUrl = String((session.metadata || {}).termsUrl || '');
+    const paymentStatus = String(session.payment_status || '').toLowerCase();
     if (!userId || !planId)
-        return res.json({ received: true });
+        return 'ignored';
+    if (opts?.enforceUserId && userId !== opts.enforceUserId)
+        throw new Error('Session user mismatch');
+    if (paymentStatus && paymentStatus !== 'paid' && paymentStatus !== 'no_payment_required')
+        return 'ignored';
     const stripePaymentIntentId = typeof session.payment_intent === 'string' ? session.payment_intent : null;
     if (stripePaymentIntentId) {
         const existingPayment = await paymentsCollection().findOne({ stripePaymentIntentId });
         if (existingPayment)
-            return res.json({ received: true });
+            return 'already_processed';
     }
     const stripeSubscriptionId = typeof session.subscription === 'string' ? session.subscription : null;
     if (stripeSubscriptionId) {
         const existing = await subsCollection().findOne({ stripeSubscriptionId });
         if (existing)
-            return res.json({ received: true });
+            return 'already_processed';
     }
     const plan = await plansCollection().findOne({ _id: planId });
     const user = await usersCollection().findOne({ _id: userId });
     if (!plan || !user)
-        return res.json({ received: true });
+        return 'ignored';
     const nowMs = Date.now();
     const activeStatuses = ['active', 'trial', 'past_due'];
     const activeSubs = await subsCollection()
@@ -543,6 +537,38 @@ app.post('/stripe/webhook', async (req, res) => {
         }
     };
     await eventBus.publish('subscriptions.paid', emailEvent);
+    return 'processed';
+};
+app.post('/stripe/confirm', authenticate, [(0, express_validator_1.body)('sessionId').isString().isLength({ min: 1 })], async (req, res) => {
+    const errors = (0, express_validator_1.validationResult)(req);
+    if (!errors.isEmpty())
+        return res.status(400).json({ errors: errors.array() });
+    if (!stripe)
+        return res.status(500).json({ error: 'Stripe is not configured' });
+    const sessionId = String(req.body?.sessionId || '');
+    const session = await stripe.checkout.sessions.retrieve(sessionId);
+    const result = await processCheckoutSessionCompleted(session, req, { enforceUserId: req.user.id });
+    return res.json({ status: 'OK', result });
+});
+app.post('/stripe/webhook', async (req, res) => {
+    if (!stripe || !STRIPE_WEBHOOK_SECRET) {
+        return res.status(500).send('Stripe webhook not configured');
+    }
+    const sig = req.header('stripe-signature');
+    if (!sig)
+        return res.status(400).send('Missing stripe-signature');
+    let event;
+    try {
+        event = stripe.webhooks.constructEvent(req.rawBody, sig, STRIPE_WEBHOOK_SECRET);
+    }
+    catch (err) {
+        return res.status(400).send(`Webhook Error: ${err?.message || String(err)}`);
+    }
+    if (event.type !== 'checkout.session.completed') {
+        return res.json({ received: true });
+    }
+    const session = event.data.object;
+    await processCheckoutSessionCompleted(session, req);
     return res.json({ received: true });
 });
 app.get('/subscriptions/me', authenticate, async (req, res) => {

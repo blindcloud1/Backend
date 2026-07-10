@@ -11,6 +11,8 @@ export type EventBusConfig = {
     url: string;
     exchange: string;
     serviceName: string;
+    maxRetries?: number;
+    retryDelayMs?: number;
 };
 export declare class EventBus {
     private connection;

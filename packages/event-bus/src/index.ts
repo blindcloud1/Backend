@@ -15,6 +15,8 @@ export type EventBusConfig = {
   url: string;
   exchange: string;
   serviceName: string;
+  maxRetries?: number;
+  retryDelayMs?: number;
 };
 
 export class EventBus {
@@ -28,10 +30,32 @@ export class EventBus {
 
   async connect(): Promise<void> {
     if (this.connection && this.channel) return;
+    const maxRetries = Math.max(1, this.config.maxRetries ?? 30);
+    const retryDelayMs = Math.max(250, this.config.retryDelayMs ?? 2000);
+    let lastError: unknown;
 
-    this.connection = await amqp.connect(this.config.url);
-    this.channel = await this.connection.createChannel();
-    await this.channel.assertExchange(this.config.exchange, 'topic', { durable: true });
+    for (let attempt = 1; attempt <= maxRetries; attempt += 1) {
+      try {
+        this.connection = await amqp.connect(this.config.url);
+        this.channel = await this.connection.createChannel();
+        await this.channel.assertExchange(this.config.exchange, 'topic', { durable: true });
+        return;
+      } catch (error) {
+        lastError = error;
+        this.channel = null;
+        this.connection = null;
+
+        if (attempt >= maxRetries) {
+          break;
+        }
+
+        await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
+      }
+    }
+
+    throw lastError instanceof Error
+      ? lastError
+      : new Error(`Failed to connect event bus for ${this.config.serviceName}`);
   }
 
   async publish<TPayload>(routingKey: string, event: CloudEvent<TPayload>): Promise<void> {
