@@ -46,9 +46,13 @@ const eventBus = new EventBus({
 
 const getUsersCollection = () => mongo.db('blindscloud').collection<UserDoc>('users');
 
+class EmailConfigError extends Error {
+  override name = 'EmailConfigError';
+}
+
 const sendSendGridMail = async (opts: { to: string; subject: string; html: string; text: string }) => {
   if (!SENDGRID_API_KEY) {
-    throw new Error('SENDGRID_API_KEY is not configured');
+    throw new EmailConfigError('SENDGRID_API_KEY is not configured');
   }
 
   const bodyJson: any = {
@@ -228,7 +232,22 @@ app.post(
     } catch (err: any) {
       const message = err instanceof Error ? err.message : String(err);
       console.error('Password reset email error:', message);
-      console.log('Password reset link:', resetUrl);
+      if (err instanceof EmailConfigError) {
+        return res.status(500).json({ error: 'Password reset email is not configured' });
+      }
+      if (message === 'SendGrid request timeout') {
+        return res.status(504).json({ error: 'Password reset email provider timeout' });
+      }
+
+      const statusMatch = message.match(/SendGrid error\s+(\d+)/i);
+      if (statusMatch) {
+        return res.status(502).json({
+          error: 'Password reset email provider error',
+          providerStatus: parseInt(statusMatch[1], 10)
+        });
+      }
+
+      return res.status(502).json({ error: 'Failed to send password reset email' });
     }
 
     return res.json({ message: responseMessage });
