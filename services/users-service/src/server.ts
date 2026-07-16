@@ -162,6 +162,12 @@ const requireAdminOrBusiness = (req: AuthRequest, res: Response, next: NextFunct
   return res.status(403).json({ error: 'Insufficient permissions' });
 };
 
+const requireEmailSender = (req: AuthRequest, res: Response, next: NextFunction) => {
+  const role = req.user?.role?.toLowerCase();
+  if (role === 'admin' || role === 'business' || role === 'employee') return next();
+  return res.status(403).json({ error: 'Insufficient permissions' });
+};
+
 const resolveTargetBusinessId = async (req: AuthRequest, explicitBusinessId?: string): Promise<string | null> => {
   const role = String(req.user?.role || '').toLowerCase();
   if (!req.user?.id) return null;
@@ -314,7 +320,7 @@ app.get('/health', async (_req: Request, res: Response) => {
 app.post(
   '/email/send',
   authenticate,
-  requireAdminOrBusiness,
+  requireEmailSender,
   [
     body('to').isEmail().normalizeEmail(),
     body('subject').isLength({ min: 1 }),

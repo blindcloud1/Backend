@@ -215,13 +215,21 @@ app.get('/jobs', authenticate, async (req: AuthRequest, res: Response) => {
 
     const jobs = await jobsCollection().find(filter).sort({ scheduledDate: -1 }).toArray();
 
-    const response = jobs.map((job, index) => {
+    const response = jobs.flatMap((job) => {
       try {
-        return toJobResponse(job);
-      } catch (err: any) {
-        throw new Error(
-          `Failed to serialize job at index ${index} with id ${job?._id || 'unknown'}: ${err?.message || String(err)}`
-        );
+        const base = toJobResponse(job);
+        const history = Array.isArray((job as any).jobHistory) ? (job as any).jobHistory : [];
+        const safeHistory = history.slice(-60).map((h: any) => ({
+          id: String(h?.id || ''),
+          timestamp: String(h?.timestamp || ''),
+          action: String(h?.action || ''),
+          description: String(h?.description || ''),
+          userId: String(h?.userId || ''),
+          userName: String(h?.userName || '')
+        }));
+        return [{ ...(base as any), jobHistory: safeHistory }];
+      } catch {
+        return [];
       }
     });
     return res.json(response);
@@ -401,17 +409,27 @@ app.put('/jobs/:id', authenticate, [param('id').isLength({ min: 1 })], async (re
   }
 
   if (typeof updates.scheduledDate === 'string') {
-    const d = parseDate(updates.scheduledDate);
-    if (!d) return res.status(400).json({ error: 'Invalid scheduledDate' });
-    const todayKey = new Date().toISOString().slice(0, 10);
-    const scheduledKey = d.toISOString().slice(0, 10);
-    if (scheduledKey < todayKey) return res.status(400).json({ error: 'Scheduled date cannot be in the past' });
-    (updates as any).scheduledDate = d;
+    const trimmed = updates.scheduledDate.trim();
+    if (!trimmed) {
+      (updates as any).scheduledDate = null;
+    } else {
+      const d = parseDate(trimmed);
+      if (!d) return res.status(400).json({ error: 'Invalid scheduledDate' });
+      const todayKey = new Date().toISOString().slice(0, 10);
+      const scheduledKey = d.toISOString().slice(0, 10);
+      if (scheduledKey < todayKey) return res.status(400).json({ error: 'Scheduled date cannot be in the past' });
+      (updates as any).scheduledDate = d;
+    }
   }
   if (typeof updates.completedDate === 'string') {
-    const d = parseDate(updates.completedDate);
-    if (!d) return res.status(400).json({ error: 'Invalid completedDate' });
-    (updates as any).completedDate = d;
+    const trimmed = updates.completedDate.trim();
+    if (!trimmed) {
+      (updates as any).completedDate = null;
+    } else {
+      const d = parseDate(trimmed);
+      if (!d) return res.status(400).json({ error: 'Invalid completedDate' });
+      (updates as any).completedDate = d;
+    }
   }
 
   updates.updatedAt = new Date();

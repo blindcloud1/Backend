@@ -145,6 +145,12 @@ const requireAdminOrBusiness = (req, res, next) => {
         return next();
     return res.status(403).json({ error: 'Insufficient permissions' });
 };
+const requireEmailSender = (req, res, next) => {
+    const role = req.user?.role?.toLowerCase();
+    if (role === 'admin' || role === 'business' || role === 'employee')
+        return next();
+    return res.status(403).json({ error: 'Insufficient permissions' });
+};
 const resolveTargetBusinessId = async (req, explicitBusinessId) => {
     const role = String(req.user?.role || '').toLowerCase();
     if (!req.user?.id)
@@ -269,7 +275,7 @@ app.get('/health', async (_req, res) => {
         res.status(500).json({ status: 'ERROR', error: err?.message || String(err) });
     }
 });
-app.post('/email/send', authenticate, requireAdminOrBusiness, [
+app.post('/email/send', authenticate, requireEmailSender, [
     (0, express_validator_1.body)('to').isEmail().normalizeEmail(),
     (0, express_validator_1.body)('subject').isLength({ min: 1 }),
     (0, express_validator_1.body)('html').optional().isString(),
@@ -731,6 +737,8 @@ app.get('/users', authenticate, async (req, res) => {
         permissions: u.permissions,
         isActive: u.isActive,
         emailVerified: u.emailVerified,
+        workingHours: u.workingHours,
+        schedulingPreferences: u.schedulingPreferences,
         createdAt: u.createdAt.toISOString()
     })));
 });
