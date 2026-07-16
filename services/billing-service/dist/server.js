@@ -448,7 +448,7 @@ const processCheckoutSessionCompleted = async (session, req, opts) => {
     if (activeSubs.length > 0) {
         await subsCollection().updateMany({ userId, status: { $in: activeStatuses } }, { $set: { status: 'cancelled', cancelAtPeriodEnd: false, currentPeriodEnd: new Date(), updatedAt: new Date() } });
     }
-    const stripeSub = stripeSubscriptionId ? await stripe.subscriptions.retrieve(stripeSubscriptionId) : null;
+    const stripeSub = stripeSubscriptionId && stripe ? await stripe.subscriptions.retrieve(stripeSubscriptionId) : null;
     const stripeStartMs = stripeSub?.current_period_start ? stripeSub.current_period_start * 1000 : nowMs;
     const stripeEndMs = stripeSub?.current_period_end ? stripeSub.current_period_end * 1000 : nowMs;
     const startDate = new Date(stripeStartMs);
