@@ -8,6 +8,9 @@ services:
       MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:-change-me}
     volumes:
       - mongo-data:/data/db
+    ports:
+      # Published to the host so services can be run outside Docker (`npm run dev`).
+      - "127.0.0.1:27017:27017"
     networks:
       - blindscloud-net
 
@@ -20,6 +23,8 @@ services:
       RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-change-me}
     ports:
       - "127.0.0.1:15672:15672"
+      # AMQP, published to the host so services can be run outside Docker (`npm run dev`).
+      - "127.0.0.1:5672:5672"
     networks:
       - blindscloud-net
 
@@ -32,8 +37,8 @@ services:
     environment:
       PORT: 4001
       JWT_SECRET: ${JWT_SECRET:-dev-secret-change}
-      MONGO_URL: ${MONGO_URL:-mongodb://${MONGO_ROOT_USER:-admin}:${MONGO_ROOT_PASSWORD:-change-me}@mongo:27017/admin}
-      RABBITMQ_URL: ${RABBITMQ_URL:-amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-change-me}@rabbitmq:5672}
+      MONGO_URL: mongodb://${MONGO_ROOT_USER:-admin}:${MONGO_ROOT_PASSWORD:-change-me}@mongo:27017/admin
+      RABBITMQ_URL: amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-change-me}@rabbitmq:5672
       EVENT_EXCHANGE: ${EVENT_EXCHANGE:-blindscloud.events}
       SEED_DEMO: ${SEED_DEMO:-true}
     depends_on:
@@ -51,8 +56,8 @@ services:
     environment:
       PORT: 4002
       JWT_SECRET: ${JWT_SECRET:-dev-secret-change}
-      MONGO_URL: ${MONGO_URL:-mongodb://${MONGO_ROOT_USER:-admin}:${MONGO_ROOT_PASSWORD:-change-me}@mongo:27017/admin}
-      RABBITMQ_URL: ${RABBITMQ_URL:-amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-change-me}@rabbitmq:5672}
+      MONGO_URL: mongodb://${MONGO_ROOT_USER:-admin}:${MONGO_ROOT_PASSWORD:-change-me}@mongo:27017/admin
+      RABBITMQ_URL: amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-change-me}@rabbitmq:5672
       EVENT_EXCHANGE: ${EVENT_EXCHANGE:-blindscloud.events}
       FRONTEND_URL: ${FRONTEND_URL:-http://localhost:5173}
       SENDGRID_API_KEY: ${SENDGRID_API_KEY:-}
@@ -73,8 +78,8 @@ services:
     environment:
       PORT: 4003
       JWT_SECRET: ${JWT_SECRET:-dev-secret-change}
-      MONGO_URL: ${MONGO_URL:-mongodb://${MONGO_ROOT_USER:-admin}:${MONGO_ROOT_PASSWORD:-change-me}@mongo:27017/admin}
-      RABBITMQ_URL: ${RABBITMQ_URL:-amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-change-me}@rabbitmq:5672}
+      MONGO_URL: mongodb://${MONGO_ROOT_USER:-admin}:${MONGO_ROOT_PASSWORD:-change-me}@mongo:27017/admin
+      RABBITMQ_URL: amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-change-me}@rabbitmq:5672
       EVENT_EXCHANGE: ${EVENT_EXCHANGE:-blindscloud.events}
     depends_on:
       - mongo
@@ -91,8 +96,8 @@ services:
     environment:
       PORT: 4004
       JWT_SECRET: ${JWT_SECRET:-dev-secret-change}
-      MONGO_URL: ${MONGO_URL:-mongodb://${MONGO_ROOT_USER:-admin}:${MONGO_ROOT_PASSWORD:-change-me}@mongo:27017/admin}
-      RABBITMQ_URL: ${RABBITMQ_URL:-amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-change-me}@rabbitmq:5672}
+      MONGO_URL: mongodb://${MONGO_ROOT_USER:-admin}:${MONGO_ROOT_PASSWORD:-change-me}@mongo:27017/admin
+      RABBITMQ_URL: amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-change-me}@rabbitmq:5672
       EVENT_EXCHANGE: ${EVENT_EXCHANGE:-blindscloud.events}
     depends_on:
       - mongo
@@ -109,8 +114,8 @@ services:
     environment:
       PORT: 4005
       JWT_SECRET: ${JWT_SECRET:-dev-secret-change}
-      MONGO_URL: ${MONGO_URL:-mongodb://${MONGO_ROOT_USER:-admin}:${MONGO_ROOT_PASSWORD:-change-me}@mongo:27017/admin}
-      RABBITMQ_URL: ${RABBITMQ_URL:-amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-change-me}@rabbitmq:5672}
+      MONGO_URL: mongodb://${MONGO_ROOT_USER:-admin}:${MONGO_ROOT_PASSWORD:-change-me}@mongo:27017/admin
+      RABBITMQ_URL: amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-change-me}@rabbitmq:5672
       EVENT_EXCHANGE: ${EVENT_EXCHANGE:-blindscloud.events}
     depends_on:
       - mongo
@@ -127,8 +132,8 @@ services:
     environment:
       PORT: 4006
       JWT_SECRET: ${JWT_SECRET:-dev-secret-change}
-      MONGO_URL: ${MONGO_URL:-mongodb://${MONGO_ROOT_USER:-admin}:${MONGO_ROOT_PASSWORD:-change-me}@mongo:27017/admin}
-      RABBITMQ_URL: ${RABBITMQ_URL:-amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-change-me}@rabbitmq:5672}
+      MONGO_URL: mongodb://${MONGO_ROOT_USER:-admin}:${MONGO_ROOT_PASSWORD:-change-me}@mongo:27017/admin
+      RABBITMQ_URL: amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-change-me}@rabbitmq:5672
       EVENT_EXCHANGE: ${EVENT_EXCHANGE:-blindscloud.events}
     depends_on:
       - mongo
@@ -145,9 +150,12 @@ services:
     environment:
       PORT: 4007
       JWT_SECRET: ${JWT_SECRET:-dev-secret-change}
-      MONGO_URL: ${MONGO_URL:-mongodb://${MONGO_ROOT_USER:-admin}:${MONGO_ROOT_PASSWORD:-change-me}@mongo:27017/admin}
-      RABBITMQ_URL: ${RABBITMQ_URL:-amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-change-me}@rabbitmq:5672}
+      MONGO_URL: mongodb://${MONGO_ROOT_USER:-admin}:${MONGO_ROOT_PASSWORD:-change-me}@mongo:27017/admin
+      RABBITMQ_URL: amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-change-me}@rabbitmq:5672
       EVENT_EXCHANGE: ${EVENT_EXCHANGE:-blindscloud.events}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_VISION_MODEL: ${OPENAI_VISION_MODEL:-gpt-4o}
+      OPENAI_VISION_DETAIL: ${OPENAI_VISION_DETAIL:-high}
     depends_on:
       - mongo
       - rabbitmq
@@ -163,8 +171,8 @@ services:
     environment:
       PORT: 4008
       JWT_SECRET: ${JWT_SECRET:-dev-secret-change}
-      MONGO_URL: ${MONGO_URL:-mongodb://${MONGO_ROOT_USER:-admin}:${MONGO_ROOT_PASSWORD:-change-me}@mongo:27017/admin}
-      RABBITMQ_URL: ${RABBITMQ_URL:-amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-change-me}@rabbitmq:5672}
+      MONGO_URL: mongodb://${MONGO_ROOT_USER:-admin}:${MONGO_ROOT_PASSWORD:-change-me}@mongo:27017/admin
+      RABBITMQ_URL: amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-change-me}@rabbitmq:5672
       EVENT_EXCHANGE: ${EVENT_EXCHANGE:-blindscloud.events}
       STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
       STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
@@ -183,8 +191,8 @@ services:
     environment:
       PORT: 4009
       JWT_SECRET: ${JWT_SECRET:-dev-secret-change}
-      MONGO_URL: ${MONGO_URL:-mongodb://${MONGO_ROOT_USER:-admin}:${MONGO_ROOT_PASSWORD:-change-me}@mongo:27017/admin}
-      RABBITMQ_URL: ${RABBITMQ_URL:-amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-change-me}@rabbitmq:5672}
+      MONGO_URL: mongodb://${MONGO_ROOT_USER:-admin}:${MONGO_ROOT_PASSWORD:-change-me}@mongo:27017/admin
+      RABBITMQ_URL: amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-change-me}@rabbitmq:5672
       EVENT_EXCHANGE: ${EVENT_EXCHANGE:-blindscloud.events}
     depends_on:
       - mongo
@@ -201,8 +209,8 @@ services:
     environment:
       PORT: 4010
       JWT_SECRET: ${JWT_SECRET:-dev-secret-change}
-      MONGO_URL: ${MONGO_URL:-mongodb://${MONGO_ROOT_USER:-admin}:${MONGO_ROOT_PASSWORD:-change-me}@mongo:27017/admin}
-      RABBITMQ_URL: ${RABBITMQ_URL:-amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-change-me}@rabbitmq:5672}
+      MONGO_URL: mongodb://${MONGO_ROOT_USER:-admin}:${MONGO_ROOT_PASSWORD:-change-me}@mongo:27017/admin
+      RABBITMQ_URL: amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-change-me}@rabbitmq:5672
       EVENT_EXCHANGE: ${EVENT_EXCHANGE:-blindscloud.events}
       UPLOAD_DIR: /data/uploads
       FILES_BASE_URL: ${FILES_BASE_URL:-}
@@ -223,8 +231,8 @@ services:
     environment:
       PORT: 4011
       JWT_SECRET: ${JWT_SECRET:-dev-secret-change}
-      MONGO_URL: ${MONGO_URL:-mongodb://${MONGO_ROOT_USER:-admin}:${MONGO_ROOT_PASSWORD:-change-me}@mongo:27017/admin}
-      RABBITMQ_URL: ${RABBITMQ_URL:-amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-change-me}@rabbitmq:5672}
+      MONGO_URL: mongodb://${MONGO_ROOT_USER:-admin}:${MONGO_ROOT_PASSWORD:-change-me}@mongo:27017/admin
+      RABBITMQ_URL: amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-change-me}@rabbitmq:5672
       EVENT_EXCHANGE: ${EVENT_EXCHANGE:-blindscloud.events}
     depends_on:
       - mongo
@@ -241,8 +249,8 @@ services:
     environment:
       PORT: 4012
       JWT_SECRET: ${JWT_SECRET:-dev-secret-change}
-      MONGO_URL: ${MONGO_URL:-mongodb://${MONGO_ROOT_USER:-admin}:${MONGO_ROOT_PASSWORD:-change-me}@mongo:27017/admin}
-      RABBITMQ_URL: ${RABBITMQ_URL:-amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-change-me}@rabbitmq:5672}
+      MONGO_URL: mongodb://${MONGO_ROOT_USER:-admin}:${MONGO_ROOT_PASSWORD:-change-me}@mongo:27017/admin
+      RABBITMQ_URL: amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-change-me}@rabbitmq:5672
       EVENT_EXCHANGE: ${EVENT_EXCHANGE:-blindscloud.events}
     depends_on:
       - mongo
@@ -259,8 +267,8 @@ services:
     environment:
       PORT: 4013
       JWT_SECRET: ${JWT_SECRET:-dev-secret-change}
-      MONGO_URL: ${MONGO_URL:-mongodb://${MONGO_ROOT_USER:-admin}:${MONGO_ROOT_PASSWORD:-change-me}@mongo:27017/admin}
-      RABBITMQ_URL: ${RABBITMQ_URL:-amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-change-me}@rabbitmq:5672}
+      MONGO_URL: mongodb://${MONGO_ROOT_USER:-admin}:${MONGO_ROOT_PASSWORD:-change-me}@mongo:27017/admin
+      RABBITMQ_URL: amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-change-me}@rabbitmq:5672
       EVENT_EXCHANGE: ${EVENT_EXCHANGE:-blindscloud.events}
     depends_on:
       - mongo
@@ -277,8 +285,8 @@ services:
     environment:
       PORT: 4014
       JWT_SECRET: ${JWT_SECRET:-dev-secret-change}
-      MONGO_URL: ${MONGO_URL:-mongodb://${MONGO_ROOT_USER:-admin}:${MONGO_ROOT_PASSWORD:-change-me}@mongo:27017/admin}
-      RABBITMQ_URL: ${RABBITMQ_URL:-amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-change-me}@rabbitmq:5672}
+      MONGO_URL: mongodb://${MONGO_ROOT_USER:-admin}:${MONGO_ROOT_PASSWORD:-change-me}@mongo:27017/admin
+      RABBITMQ_URL: amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-change-me}@rabbitmq:5672
       EVENT_EXCHANGE: ${EVENT_EXCHANGE:-blindscloud.events}
     depends_on:
       - mongo
@@ -295,8 +303,8 @@ services:
     environment:
       PORT: 4015
       JWT_SECRET: ${JWT_SECRET:-dev-secret-change}
-      MONGO_URL: ${MONGO_URL:-mongodb://${MONGO_ROOT_USER:-admin}:${MONGO_ROOT_PASSWORD:-change-me}@mongo:27017/admin}
-      RABBITMQ_URL: ${RABBITMQ_URL:-amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-change-me}@rabbitmq:5672}
+      MONGO_URL: mongodb://${MONGO_ROOT_USER:-admin}:${MONGO_ROOT_PASSWORD:-change-me}@mongo:27017/admin
+      RABBITMQ_URL: amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-change-me}@rabbitmq:5672
       EVENT_EXCHANGE: ${EVENT_EXCHANGE:-blindscloud.events}
     depends_on:
       - mongo
@@ -313,8 +321,8 @@ services:
     environment:
       PORT: 4016
       JWT_SECRET: ${JWT_SECRET:-dev-secret-change}
-      MONGO_URL: ${MONGO_URL:-mongodb://${MONGO_ROOT_USER:-admin}:${MONGO_ROOT_PASSWORD:-change-me}@mongo:27017/admin}
-      RABBITMQ_URL: ${RABBITMQ_URL:-amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-change-me}@rabbitmq:5672}
+      MONGO_URL: mongodb://${MONGO_ROOT_USER:-admin}:${MONGO_ROOT_PASSWORD:-change-me}@mongo:27017/admin
+      RABBITMQ_URL: amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-change-me}@rabbitmq:5672
       EVENT_EXCHANGE: ${EVENT_EXCHANGE:-blindscloud.events}
     depends_on:
       - mongo
@@ -331,8 +339,8 @@ services:
     environment:
       PORT: 4017
       JWT_SECRET: ${JWT_SECRET:-dev-secret-change}
-      MONGO_URL: ${MONGO_URL:-mongodb://${MONGO_ROOT_USER:-admin}:${MONGO_ROOT_PASSWORD:-change-me}@mongo:27017/admin}
-      RABBITMQ_URL: ${RABBITMQ_URL:-amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-change-me}@rabbitmq:5672}
+      MONGO_URL: mongodb://${MONGO_ROOT_USER:-admin}:${MONGO_ROOT_PASSWORD:-change-me}@mongo:27017/admin
+      RABBITMQ_URL: amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASSWORD:-change-me}@rabbitmq:5672
       EVENT_EXCHANGE: ${EVENT_EXCHANGE:-blindscloud.events}
     depends_on:
       - mongo

@@ -41,6 +41,19 @@ const EFFECTIVE_ALLOWED_ORIGINS = (
     : (process.env.NODE_ENV === 'production' ? DEFAULT_ALLOWED_ORIGINS : [])
 ).map(normalizeOrigin);
 
+// In development the Vite dev server may pick any free port (5173 is often taken by
+// another project), so allow any localhost origin. Production stays strict.
+const isLocalhostOrigin = (value: string): boolean =>
+  /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/.test(value);
+
+const isOriginAllowed = (origin: string): boolean => {
+  const normalized = normalizeOrigin(origin);
+  if (EFFECTIVE_ALLOWED_ORIGINS.length === 0) return true;
+  if (EFFECTIVE_ALLOWED_ORIGINS.includes(normalized)) return true;
+  if (process.env.NODE_ENV !== 'production' && isLocalhostOrigin(normalized)) return true;
+  return false;
+};
+
 const app = express();
 app.use(helmet({ crossOriginResourcePolicy: false }));
 
@@ -49,9 +62,7 @@ app.use((req: Request, res: Response, next) => {
   if (!origin) return next();
 
   const normalizedOrigin = normalizeOrigin(String(origin));
-  const allowed =
-    EFFECTIVE_ALLOWED_ORIGINS.length === 0 ||
-    EFFECTIVE_ALLOWED_ORIGINS.includes(normalizedOrigin);
+  const allowed = isOriginAllowed(normalizedOrigin);
 
   if (!allowed) return next();
 
@@ -70,9 +81,7 @@ app.use((req: Request, res: Response, next) => {
 const corsOptions = {
   origin: (origin, callback) => {
     if (!origin) return callback(null, true);
-    if (EFFECTIVE_ALLOWED_ORIGINS.length === 0) return callback(null, true);
-    const normalizedOrigin = normalizeOrigin(origin);
-    if (EFFECTIVE_ALLOWED_ORIGINS.includes(normalizedOrigin)) return callback(null, true);
+    if (isOriginAllowed(origin)) return callback(null, true);
     return callback(null, false);
   },
   credentials: true,
@@ -410,6 +419,21 @@ app.use(createProxyMiddleware({
   changeOrigin: true,
   pathFilter: '/api/products',
   pathRewrite: { '^/api/products': '/products' },
+  on: {
+    proxyReq: (proxyReq: ClientRequest, req: IncomingMessage, _res: ServerResponse) => {
+      const correlationId = req.headers['x-correlation-id'];
+      if (correlationId && typeof correlationId === 'string') {
+        proxyReq.setHeader('x-correlation-id', correlationId);
+      }
+    }
+  }
+}));
+
+app.use(createProxyMiddleware({
+  target: PRICING_SERVICE_URL,
+  changeOrigin: true,
+  pathFilter: '/api/vision',
+  pathRewrite: { '^/api/vision': '/vision' },
   on: {
     proxyReq: (proxyReq: ClientRequest, req: IncomingMessage, _res: ServerResponse) => {
       const correlationId = req.headers['x-correlation-id'];

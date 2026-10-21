@@ -1,4 +1,21 @@
-node_env=development
-node_modules=node_modules
-node_modules
+# dependencies
+node_modules/
+
+# local environment / secrets - NEVER commit these
 .env
+.env.*
+!.env.example
+
+# build output
+dist/
+build/
+
+# logs
+*.log
+npm-debug.log*
+
+# editor / OS
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

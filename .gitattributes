@@ -1,0 +1,21 @@
+# Shell scripts must keep LF endings. On the VPS (Linux) a CRLF shebang makes
+# the script fail with "bad interpreter: /bin/bash^M".
+*.sh text eol=lf
+
+# Docker / compose files
+Dockerfile text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+
+# Keep env files as-is (no newline normalisation, they are often sourced by shell)
+.env text eol=lf
+.env.* text eol=lf
+
+# Binary-ish assets
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.zip binary
