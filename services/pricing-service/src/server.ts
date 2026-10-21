@@ -10,6 +10,8 @@ import type { PricingTableDoc, UserDoc, UserRole } from '@blindscloud/models';
 import {
   checkVisionRateLimit,
   extractPricingFromImage,
+  extractProductsFromImage,
+  extractSpecificationsFromImage,
   isVisionConfigured,
   visionUpload
 } from './vision';
@@ -80,6 +82,49 @@ const app = express();
 app.use(express.json({ limit: '4mb' }));
 app.use(helmet());
 
+/**
+ * Wraps the multer upload so file errors (too large, wrong field name) come
+ * back as a clean JSON error instead of Express's default HTML page.
+ */
+const visionUploadSingle = (req: AuthRequest, res: Response, next: NextFunction) => {
+  visionUpload.single('file')(req, res, (err: any) => {
+    if (!err) return next();
+    if (err?.code === 'LIMIT_FILE_SIZE') {
+      return res.status(413).json({ error: 'Image is too large. The maximum size is 8 MB.' });
+    }
+    return res.status(400).json({ error: err?.message || 'Invalid image upload.' });
+  });
+};
+
+/**
+ * Shared checks for the /vision/* extraction endpoints: config check, file
+ * check and per-user rate limit. Returns the uploaded file, or `undefined`
+ * after having already sent the error response.
+ */
+const runVisionChecks = (req: AuthRequest, res: Response): any | undefined => {
+  if (!isVisionConfigured()) {
+    res.status(501).json({ error: 'AI extraction is not configured on this server' });
+    return undefined;
+  }
+
+  const file = (req as any).file;
+  if (!file) {
+    res.status(400).json({ error: 'No image file provided' });
+    return undefined;
+  }
+
+  const rate = checkVisionRateLimit(req.user!.id);
+  if (!rate.ok) {
+    res.setHeader('Retry-After', String(rate.retryAfterSeconds));
+    res.status(429).json({
+      error: `Too many AI extractions. Please wait ${rate.retryAfterSeconds}s and try again.`
+    });
+    return undefined;
+  }
+
+  return file;
+};
+
 app.get('/health', async (_req: Request, res: Response) => {
   try {
     await mongo.db('admin').command({ ping: 1 });
@@ -103,24 +148,10 @@ app.post(
   '/vision/pricing-extract',
   authenticate,
   requireAdminOrBusiness,
-  visionUpload.single('file'),
+  visionUploadSingle,
   async (req: AuthRequest, res: Response) => {
-    if (!isVisionConfigured()) {
-      return res.status(501).json({ error: 'AI extraction is not configured on this server' });
-    }
-
-    const file = (req as any).file;
-    if (!file) {
-      return res.status(400).json({ error: 'No image file provided' });
-    }
-
-    const rate = checkVisionRateLimit(req.user!.id);
-    if (!rate.ok) {
-      res.setHeader('Retry-After', String(rate.retryAfterSeconds));
-      return res.status(429).json({
-        error: `Too many AI extractions. Please wait ${rate.retryAfterSeconds}s and try again.`
-      });
-    }
+    const file = runVisionChecks(req, res);
+    if (!file) return;
 
     const result = await extractPricingFromImage(file.buffer, file.mimetype);
     if (!result.ok) {
@@ -152,6 +183,53 @@ app.post(
         priceMatrix: table.priceMatrix
       }
     });
+  }
+);
+
+/**
+ * AI product extraction (product page "Use AI"). Accepts a single image of a
+ * product catalog/flyer and returns the extracted products as an editable row
+ * list plus a properly quoted CSV block:
+ *   products - [{ name, category, price, vatPercentage, description, specifications[] }]
+ *   csv      - name,category,price,vat_percentage,description,specifications
+ */
+app.post(
+  '/vision/product-extract',
+  authenticate,
+  requireAdminOrBusiness,
+  visionUploadSingle,
+  async (req: AuthRequest, res: Response) => {
+    const file = runVisionChecks(req, res);
+    if (!file) return;
+
+    const result = await extractProductsFromImage(file.buffer, file.mimetype);
+    if (!result.ok) {
+      return res.status(result.status).json({ error: result.error });
+    }
+    return res.json({ products: result.products, csv: result.csv });
+  }
+);
+
+/**
+ * AI specification extraction (product form "Use AI" next to + Add
+ * Specification). Returns one entry per bullet/line found in the image:
+ *   specifications - string[]
+ *   csv            - one quoted field per line
+ */
+app.post(
+  '/vision/specification-extract',
+  authenticate,
+  requireAdminOrBusiness,
+  visionUploadSingle,
+  async (req: AuthRequest, res: Response) => {
+    const file = runVisionChecks(req, res);
+    if (!file) return;
+
+    const result = await extractSpecificationsFromImage(file.buffer, file.mimetype);
+    if (!result.ok) {
+      return res.status(result.status).json({ error: result.error });
+    }
+    return res.json({ specifications: result.specifications, csv: result.csv });
   }
 );
 
