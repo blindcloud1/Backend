@@ -34,6 +34,18 @@ type AuthUser = {
 
 type AuthRequest = Request & { user?: AuthUser };
 
+type EmailLogDoc = {
+  _id: string;
+  businessId?: string;
+  email: string;
+  subject: string;
+  status: 'sent' | 'failed';
+  error?: string;
+  sentBy?: string;
+  sentByRole?: string;
+  createdAt: Date;
+};
+
 const mongo = new MongoClient(MONGO_URL);
 const eventBus = new EventBus({
   url: RABBITMQ_URL,
@@ -45,6 +57,7 @@ const usersCollection = () => mongo.db('blindscloud').collection<UserDoc>('users
 const businessesCollection = () => mongo.db('blindscloud').collection<BusinessDoc>('businesses');
 const plansCollection = () => mongo.db('blindscloud').collection<SubscriptionPlanDoc>('subscription_plans');
 const subsCollection = () => mongo.db('blindscloud').collection<UserSubscriptionDoc>('user_subscriptions');
+const emailLogsCollection = () => mongo.db('blindscloud').collection<EmailLogDoc>('email_logs');
 
 const escapeRegExp = (value: string): string => {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -487,6 +500,24 @@ app.post(
         req2.write(raw);
         req2.end();
       });
+
+      // Persist a server-side record of the sent email (for usage reporting)
+      try {
+        const loggedBusinessId = await resolveTargetBusinessId(req, payload.businessId);
+        await emailLogsCollection().insertOne({
+          _id: crypto.randomUUID(),
+          businessId: loggedBusinessId || undefined,
+          email: to,
+          subject,
+          status: 'sent',
+          sentBy: req.user?.id ? String(req.user.id) : undefined,
+          sentByRole: role,
+          createdAt: new Date()
+        });
+      } catch (logErr) {
+        console.error('Failed to record email log:', logErr);
+      }
+
       return res.json({ status: 'OK' });
     } catch (err: any) {
       if (err instanceof EmailConfigError) {
@@ -880,7 +911,9 @@ app.get('/users', authenticate, async (req: AuthRequest, res: Response) => {
     emailVerified: u.emailVerified,
     workingHours: u.workingHours,
     schedulingPreferences: u.schedulingPreferences,
-    createdAt: u.createdAt.toISOString()
+    createdAt: u.createdAt.toISOString(),
+    lastLoginAt: (u as any).lastLoginAt ? new Date((u as any).lastLoginAt).toISOString() : null,
+    lastLogoutAt: (u as any).lastLogoutAt ? new Date((u as any).lastLogoutAt).toISOString() : null
   })));
 });
 

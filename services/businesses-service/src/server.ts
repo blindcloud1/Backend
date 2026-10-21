@@ -142,6 +142,65 @@ app.get('/businesses/:id', authenticate, async (req: AuthRequest, res: Response)
   return res.json({ ...business, createdAt: business.createdAt.toISOString(), updatedAt: business.updatedAt?.toISOString() });
 });
 
+// Usage statistics for a business: real counts aggregated from the database.
+// Used by the admin Business Management "Usage" modal.
+app.get(
+  '/businesses/:id/usage',
+  authenticate,
+  requireAdminOrBusiness,
+  async (req: AuthRequest, res: Response) => {
+    const role = req.user!.role.toLowerCase();
+    const currentUser = await getCurrentUser(req);
+    if (!currentUser) return res.status(401).json({ error: 'User not found' });
+
+    const businessId = String(req.params.id || '').trim();
+    if (!businessId) return res.status(400).json({ error: 'Business id is required' });
+    if (!(await canAccessBusinessOrChild(role, currentUser, businessId))) {
+      return res.status(403).json({ error: 'Insufficient permissions' });
+    }
+
+    const business = await businessesCollection().findOne({ _id: businessId } as any);
+    if (!business) return res.status(404).json({ error: 'Business not found' });
+
+    const db = mongo.db('blindscloud');
+    const productsCount = db.collection('products').countDocuments({ businessId } as any);
+    const usersCount = db.collection('users').countDocuments({ businessId } as any);
+    const employeesCount = db.collection('users').countDocuments({ businessId, role: 'employee' } as any);
+    const subBusinessesCount = db.collection('businesses').countDocuments({ parentBusinessId: businessId } as any);
+    const installationsCount = db.collection('jobs').countDocuments({ businessId, jobType: 'installation' } as any);
+    const measurementJobsCount = db.collection('jobs').countDocuments({ businessId, jobType: 'measurement' } as any);
+    const otherJobsCount = db.collection('jobs').countDocuments({ businessId, jobType: 'other' } as any);
+    const emailsSentCount = db.collection('email_logs').countDocuments({ businessId } as any);
+
+    const [products, users, employees, subBusinesses, installations, measurementJobs, otherJobs, emailsSent] =
+      await Promise.all([
+        productsCount,
+        usersCount,
+        employeesCount,
+        subBusinessesCount,
+        installationsCount,
+        measurementJobsCount,
+        otherJobsCount,
+        emailsSentCount
+      ]);
+
+    return res.json({
+      businessId,
+      businessName: business.name,
+      products,
+      users,
+      employees,
+      subBusinesses,
+      installations,
+      measurementJobs,
+      otherJobs,
+      totalJobs: installations + measurementJobs + otherJobs,
+      emailsSent,
+      generatedAt: new Date().toISOString()
+    });
+  }
+);
+
 app.post(
   '/businesses',
   authenticate,

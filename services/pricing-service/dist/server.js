@@ -11,6 +11,7 @@ const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const mongodb_1 = require("mongodb");
 const crypto_1 = __importDefault(require("crypto"));
 const event_bus_1 = require("@blindscloud/event-bus");
+const vision_1 = require("./vision");
 dotenv_1.default.config();
 const PORT = parseInt(process.env.PORT || '4007', 10);
 const JWT_SECRET = process.env.JWT_SECRET || '';
@@ -77,6 +78,59 @@ app.get('/health', async (_req, res) => {
     catch (err) {
         res.status(500).json({ status: 'ERROR', error: err?.message || String(err) });
     }
+});
+/**
+ * AI pricing-table extraction.
+ *
+ * Accepts an image of a supplier price list, returns the extracted matrix in
+ * two forms:
+ *   text - the tab separated CSV block (one line per width) which pastes
+ *          straight into the pricing table grid
+ *   table - the fully structured table (name, unit, widths, drops, matrix)
+ *          which the UI can apply to the grid in one click
+ */
+app.post('/vision/pricing-extract', authenticate, requireAdminOrBusiness, vision_1.visionUpload.single('file'), async (req, res) => {
+    if (!(0, vision_1.isVisionConfigured)()) {
+        return res.status(501).json({ error: 'AI extraction is not configured on this server' });
+    }
+    const file = req.file;
+    if (!file) {
+        return res.status(400).json({ error: 'No image file provided' });
+    }
+    const rate = (0, vision_1.checkVisionRateLimit)(req.user.id);
+    if (!rate.ok) {
+        res.setHeader('Retry-After', String(rate.retryAfterSeconds));
+        return res.status(429).json({
+            error: `Too many AI extractions. Please wait ${rate.retryAfterSeconds}s and try again.`
+        });
+    }
+    const result = await (0, vision_1.extractPricingFromImage)(file.buffer, file.mimetype);
+    if (!result.ok) {
+        return res.status(result.status).json({ error: result.error });
+    }
+    const table = result.table;
+    // Human readable summary - shown above the CSV block in the UI.
+    const summary = [
+        `Table: ${table.name || '(no name detected)'}`,
+        `Unit: ${table.unitSystem}`,
+        `Widths: ${table.widthValues.length}  Drops: ${table.dropValues.length}`,
+        `Widths -> ${table.widthValues.join(', ')}`,
+        `Drops  -> ${table.dropValues.join(', ')}`,
+        '',
+        'Copy the block below and paste it into the table grid (it starts at the top-left cell):',
+        ''
+    ].join('\n');
+    return res.json({
+        text: summary + table.csv,
+        csv: table.csv,
+        table: {
+            name: table.name,
+            unitSystem: table.unitSystem,
+            widthValues: table.widthValues,
+            dropValues: table.dropValues,
+            priceMatrix: table.priceMatrix
+        }
+    });
 });
 app.get('/pricing-tables', authenticate, async (req, res) => {
     const role = req.user.role.toLowerCase();

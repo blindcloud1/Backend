@@ -136,6 +136,15 @@ const handleLogin = async (req: Request, res: Response) => {
   const ok = await bcrypt.compare(password, user.passwordHash);
   if (!ok) return res.status(401).json({ error: 'Invalid credentials' });
 
+  // Record the last login timestamp on the user document
+  const lastLoginAt = new Date();
+  try {
+    await users.updateOne({ _id: user._id }, { $set: { lastLoginAt } });
+    user.lastLoginAt = lastLoginAt;
+  } catch (err) {
+    console.error('Failed to record lastLoginAt:', err);
+  }
+
   const token = jwt.sign(
     { userId: String(user._id), email: user.email, role: user.role },
     JWT_SECRET,
@@ -168,7 +177,8 @@ const handleLogin = async (req: Request, res: Response) => {
       permissions: user.permissions,
       isActive: user.isActive,
       emailVerified: user.emailVerified,
-      createdAt: user.createdAt.toISOString()
+      createdAt: user.createdAt.toISOString(),
+      lastLoginAt: lastLoginAt.toISOString()
     },
     token
   });
@@ -177,9 +187,33 @@ const handleLogin = async (req: Request, res: Response) => {
 app.post('/auth/login', loginValidators, handleLogin);
 app.post('/login', loginValidators, handleLogin);
 
-app.post('/auth/logout', (_req: Request, res: Response) => {
+const handleLogout = async (req: Request, res: Response) => {
+  // Record the last logout timestamp using the caller's token (best effort)
+  try {
+    const header = req.header('authorization') || req.header('Authorization') || '';
+    const match = header.match(/^Bearer\s+(.+)$/i);
+    if (match) {
+      const decoded = jwt.verify(match[1], JWT_SECRET) as { userId?: string };
+      if (decoded?.userId) {
+        const users = getUsersCollection();
+        const userId = String(decoded.userId);
+        try {
+          const { ObjectId } = await import('mongodb');
+          const filter = ObjectId.isValid(userId) ? new ObjectId(userId) : userId;
+          await users.updateOne({ _id: filter as any }, { $set: { lastLogoutAt: new Date() } });
+        } catch {
+          await users.updateOne({ _id: userId as any }, { $set: { lastLogoutAt: new Date() } });
+        }
+      }
+    }
+  } catch (err) {
+    console.error('Failed to record lastLogoutAt:', err);
+  }
   res.json({ status: 'OK' });
-});
+};
+
+app.post('/auth/logout', handleLogout);
+app.post('/logout', handleLogout);
 
 app.post(
   '/auth/forgot-password',
