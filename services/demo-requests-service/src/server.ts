@@ -6,7 +6,7 @@ import jwt from 'jsonwebtoken';
 import { MongoClient } from 'mongodb';
 import crypto from 'crypto';
 import { EventBus, type CloudEvent } from '@blindscloud/event-bus';
-import type { BusinessSize, DemoRequestDoc, UserRole } from '@blindscloud/models';
+import type { BusinessSize, CompanyType, DemoRequestDoc, UserRole } from '@blindscloud/models';
 
 dotenv.config();
 
@@ -58,6 +58,10 @@ const isBusinessSize = (value: any): value is BusinessSize => {
   return ['small', 'medium', 'large'].includes(String(value));
 };
 
+const isCompanyType = (value: any): value is CompanyType => {
+  return ['windows', 'blinds', 'carpets'].includes(String(value));
+};
+
 const toResponse = (d: DemoRequestDoc) => ({ ...d, createdAt: d.createdAt.toISOString() });
 
 const app = express();
@@ -75,19 +79,30 @@ app.get('/health', async (_req: Request, res: Response) => {
 
 app.post(
   '/demo-requests',
-  [body('name').isLength({ min: 1 }), body('businessSize').isString(), body('email').isEmail().normalizeEmail()],
+  [
+    body('name').isLength({ min: 1 }),
+    body('businessSize').optional().isString(),
+    body('companyType').optional().isString(),
+    body('email').isEmail().normalizeEmail()
+  ],
   async (req: Request, res: Response) => {
     const errors = validationResult(req);
     if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
 
     const payload = req.body as Partial<DemoRequestDoc>;
-    if (!isBusinessSize(payload.businessSize)) return res.status(400).json({ error: 'Invalid businessSize' });
+    if (payload.businessSize !== undefined && !isBusinessSize(payload.businessSize)) {
+      return res.status(400).json({ error: 'Invalid businessSize' });
+    }
+    if (payload.companyType !== undefined && !isCompanyType(payload.companyType)) {
+      return res.status(400).json({ error: 'Invalid companyType' });
+    }
 
     const doc: DemoRequestDoc = {
       _id: crypto.randomUUID(),
       name: String(payload.name || ''),
       companyName: payload.companyName,
       businessSize: payload.businessSize,
+      companyType: payload.companyType,
       phone: payload.phone,
       email: String(payload.email || '').toLowerCase(),
       createdAt: new Date()

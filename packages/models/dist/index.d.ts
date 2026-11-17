@@ -3,6 +3,7 @@ export type IsoDateString = string;
 export type UserRole = 'admin' | 'business' | 'employee' | 'merchant';
 export type BusinessSubscriptionTier = 'basic' | 'premium' | 'enterprise';
 export type BusinessSize = 'small' | 'medium' | 'large';
+export type CompanyType = 'windows' | 'blinds' | 'carpets';
 export type JobStatus = 'pending' | 'assigned' | 'confirmed' | 'in-progress' | 'completed' | 'cancelled' | 'tbd' | 'awaiting-deposit' | 'awaiting-payment';
 export type OrderUnit = 'cm' | 'inch' | 'mm';
 export type OrderStatus = 'pending' | 'accepted' | 'ready' | 'delivered' | 'cancelled';
@@ -45,6 +46,7 @@ export type BusinessDoc = DbDocBase & DbTimestamps & {
     address: string;
     phone?: string;
     email?: string;
+    companyType?: CompanyType;
     adminId?: string;
     parentBusinessId?: string;
     isSubBusiness?: boolean;
@@ -302,7 +304,8 @@ export type OrderDoc = DbDocBase & DbTimestamps & {
 export type DemoRequestDoc = DbDocBase & {
     name: string;
     companyName?: string;
-    businessSize: BusinessSize;
+    businessSize?: BusinessSize;
+    companyType?: CompanyType;
     phone?: string;
     email: string;
     createdAt: Date;

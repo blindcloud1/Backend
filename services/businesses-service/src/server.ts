@@ -162,15 +162,27 @@ app.get(
     const business = await businessesCollection().findOne({ _id: businessId } as any);
     if (!business) return res.status(404).json({ error: 'Business not found' });
 
+    // Optional date range filter (yyyy-mm-dd, inclusive).
+    const fromRaw = String(req.query?.from || '').trim();
+    const toRaw = String(req.query?.to || '').trim();
+    const fromDate = fromRaw ? new Date(fromRaw + 'T00:00:00.000') : null;
+    const toDate = toRaw ? new Date(toRaw + 'T23:59:59.999') : null;
+    const dateFilter: any = {};
+    if (fromDate && !isNaN(fromDate.getTime())) dateFilter.$gte = fromDate;
+    if (toDate && !isNaN(toDate.getTime())) dateFilter.$lte = toDate;
+    const hasDateFilter = Object.keys(dateFilter).length > 0;
+    const jobDateQuery = hasDateFilter ? { createdAt: dateFilter } : {};
+    const emailDateQuery = hasDateFilter ? { createdAt: dateFilter } : {};
+
     const db = mongo.db('blindscloud');
     const productsCount = db.collection('products').countDocuments({ businessId } as any);
     const usersCount = db.collection('users').countDocuments({ businessId } as any);
     const employeesCount = db.collection('users').countDocuments({ businessId, role: 'employee' } as any);
     const subBusinessesCount = db.collection('businesses').countDocuments({ parentBusinessId: businessId } as any);
-    const installationsCount = db.collection('jobs').countDocuments({ businessId, jobType: 'installation' } as any);
-    const measurementJobsCount = db.collection('jobs').countDocuments({ businessId, jobType: 'measurement' } as any);
-    const otherJobsCount = db.collection('jobs').countDocuments({ businessId, jobType: 'other' } as any);
-    const emailsSentCount = db.collection('email_logs').countDocuments({ businessId } as any);
+    const installationsCount = db.collection('jobs').countDocuments({ businessId, jobType: 'installation', ...jobDateQuery } as any);
+    const measurementJobsCount = db.collection('jobs').countDocuments({ businessId, jobType: 'measurement', ...jobDateQuery } as any);
+    const otherJobsCount = db.collection('jobs').countDocuments({ businessId, jobType: 'other', ...jobDateQuery } as any);
+    const emailsSentCount = db.collection('email_logs').countDocuments({ businessId, ...emailDateQuery } as any);
 
     const [products, users, employees, subBusinesses, installations, measurementJobs, otherJobs, emailsSent] =
       await Promise.all([

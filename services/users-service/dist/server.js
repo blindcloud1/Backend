@@ -39,6 +39,7 @@ const usersCollection = () => mongo.db('blindscloud').collection('users');
 const businessesCollection = () => mongo.db('blindscloud').collection('businesses');
 const plansCollection = () => mongo.db('blindscloud').collection('subscription_plans');
 const subsCollection = () => mongo.db('blindscloud').collection('user_subscriptions');
+const emailLogsCollection = () => mongo.db('blindscloud').collection('email_logs');
 const escapeRegExp = (value) => {
     return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 };
@@ -188,6 +189,7 @@ app.use((0, helmet_1.default)());
 app.post('/public-signup', [
     (0, express_validator_1.body)('name').isLength({ min: 1, max: 50 }),
     (0, express_validator_1.body)('companyName').isLength({ min: 1 }),
+    (0, express_validator_1.body)('companyType').optional().isString(),
     (0, express_validator_1.body)('email').isEmail().normalizeEmail(),
     (0, express_validator_1.body)('password').isLength({ min: 8 }),
     (0, express_validator_1.body)('phone').optional().isString()
@@ -196,6 +198,10 @@ app.post('/public-signup', [
     if (!errors.isEmpty())
         return res.status(400).json({ errors: errors.array() });
     const payload = req.body;
+    if (payload.companyType !== undefined &&
+        !['windows', 'blinds', 'carpets'].includes(String(payload.companyType))) {
+        return res.status(400).json({ error: 'Invalid companyType' });
+    }
     const email = String(payload.email || '').trim().toLowerCase();
     const emailRegex = new RegExp(`^${escapeRegExp(email)}$`, 'i');
     const [existingUser, existingBusiness] = await Promise.all([
@@ -213,6 +219,7 @@ app.post('/public-signup', [
         address: '',
         phone: payload.phone ? String(payload.phone) : undefined,
         email,
+        companyType: payload.companyType,
         adminId: undefined,
         features: ['job_management', 'calendar', 'reports', 'public_signup_pending'],
         subscription: 'basic',
@@ -414,6 +421,23 @@ app.post('/email/send', authenticate, requireEmailSender, [
             req2.write(raw);
             req2.end();
         });
+        // Persist a server-side record of the sent email (for usage reporting)
+        try {
+            const loggedBusinessId = await resolveTargetBusinessId(req, payload.businessId);
+            await emailLogsCollection().insertOne({
+                _id: crypto_1.default.randomUUID(),
+                businessId: loggedBusinessId || undefined,
+                email: to,
+                subject,
+                status: 'sent',
+                sentBy: req.user?.id ? String(req.user.id) : undefined,
+                sentByRole: role,
+                createdAt: new Date()
+            });
+        }
+        catch (logErr) {
+            console.error('Failed to record email log:', logErr);
+        }
         return res.json({ status: 'OK' });
     }
     catch (err) {
@@ -739,7 +763,9 @@ app.get('/users', authenticate, async (req, res) => {
         emailVerified: u.emailVerified,
         workingHours: u.workingHours,
         schedulingPreferences: u.schedulingPreferences,
-        createdAt: u.createdAt.toISOString()
+        createdAt: u.createdAt.toISOString(),
+        lastLoginAt: u.lastLoginAt ? new Date(u.lastLoginAt).toISOString() : null,
+        lastLogoutAt: u.lastLogoutAt ? new Date(u.lastLogoutAt).toISOString() : null
     })));
 });
 app.post('/users', authenticate, requireAdminOrBusiness, [

@@ -55,6 +55,9 @@ const requireAdmin = (req, res, next) => {
 const isBusinessSize = (value) => {
     return ['small', 'medium', 'large'].includes(String(value));
 };
+const isCompanyType = (value) => {
+    return ['windows', 'blinds', 'carpets'].includes(String(value));
+};
 const toResponse = (d) => ({ ...d, createdAt: d.createdAt.toISOString() });
 const app = (0, express_1.default)();
 app.use(express_1.default.json({ limit: '1mb' }));
@@ -68,18 +71,28 @@ app.get('/health', async (_req, res) => {
         res.status(500).json({ status: 'ERROR', error: err?.message || String(err) });
     }
 });
-app.post('/demo-requests', [(0, express_validator_1.body)('name').isLength({ min: 1 }), (0, express_validator_1.body)('businessSize').isString(), (0, express_validator_1.body)('email').isEmail().normalizeEmail()], async (req, res) => {
+app.post('/demo-requests', [
+    (0, express_validator_1.body)('name').isLength({ min: 1 }),
+    (0, express_validator_1.body)('businessSize').optional().isString(),
+    (0, express_validator_1.body)('companyType').optional().isString(),
+    (0, express_validator_1.body)('email').isEmail().normalizeEmail()
+], async (req, res) => {
     const errors = (0, express_validator_1.validationResult)(req);
     if (!errors.isEmpty())
         return res.status(400).json({ errors: errors.array() });
     const payload = req.body;
-    if (!isBusinessSize(payload.businessSize))
+    if (payload.businessSize !== undefined && !isBusinessSize(payload.businessSize)) {
         return res.status(400).json({ error: 'Invalid businessSize' });
+    }
+    if (payload.companyType !== undefined && !isCompanyType(payload.companyType)) {
+        return res.status(400).json({ error: 'Invalid companyType' });
+    }
     const doc = {
         _id: crypto_1.default.randomUUID(),
         name: String(payload.name || ''),
         companyName: payload.companyName,
         businessSize: payload.businessSize,
+        companyType: payload.companyType,
         phone: payload.phone,
         email: String(payload.email || '').toLowerCase(),
         createdAt: new Date()

@@ -7,7 +7,7 @@ import jwt from 'jsonwebtoken';
 import { MongoClient } from 'mongodb';
 import crypto from 'crypto';
 import { EventBus, type CloudEvent } from '@blindscloud/event-bus';
-import type { BusinessDoc, SubscriptionPlanDoc, UserDoc, UserRole, UserSubscriptionDoc } from '@blindscloud/models';
+import type { BusinessDoc, CompanyType, SubscriptionPlanDoc, UserDoc, UserRole, UserSubscriptionDoc } from '@blindscloud/models';
 import https from 'https';
 
 dotenv.config();
@@ -228,6 +228,7 @@ app.post(
   [
     body('name').isLength({ min: 1, max: 50 }),
     body('companyName').isLength({ min: 1 }),
+    body('companyType').optional().isString(),
     body('email').isEmail().normalizeEmail(),
     body('password').isLength({ min: 8 }),
     body('phone').optional().isString()
@@ -239,10 +240,18 @@ app.post(
     const payload = req.body as {
       name: string;
       companyName: string;
+      companyType?: CompanyType;
       email: string;
       password: string;
       phone?: string;
     };
+
+    if (
+      payload.companyType !== undefined &&
+      !['windows', 'blinds', 'carpets'].includes(String(payload.companyType))
+    ) {
+      return res.status(400).json({ error: 'Invalid companyType' });
+    }
 
     const email = String(payload.email || '').trim().toLowerCase();
     const emailRegex = new RegExp(`^${escapeRegExp(email)}$`, 'i');
@@ -263,6 +272,7 @@ app.post(
       address: '',
       phone: payload.phone ? String(payload.phone) : undefined,
       email,
+      companyType: payload.companyType,
       adminId: undefined,
       features: ['job_management', 'calendar', 'reports', 'public_signup_pending'],
       subscription: 'basic' as any,

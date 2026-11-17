@@ -5,9 +5,9 @@
 # Pulls the latest images published to GHCR and restarts the production stack.
 #
 # FIXES vs the previous version
-#   1. `docker compose down` used the DEFAULT compose file (docker-compose.yml),
-#      so it tore down the DEVELOPMENT stack definition instead of production.
-#      It now always uses docker-compose.prod.yml.
+#   1. No more `docker compose down` - the whole stack used to be stopped before
+#      pulling, causing a downtime window. Now we pull first and let `up -d`
+#      recreate only the containers whose image/config changed (rolling update).
 #   2. Waits for the gateway to actually answer /health before declaring success.
 #   3. Installs / refreshes the nightly mongodump cron entry.
 #   4. Runs a backup immediately after deploying, so a bad deploy is always
@@ -69,18 +69,15 @@ install_backup_cron() {
 # --------------------------------------------------------------------------
 # Deploy
 # --------------------------------------------------------------------------
-log "1/5  Stopping the current production stack"
-# NOTE: no `-v`. The named volumes mongo-data and uploads-data hold all
-# production data and must survive the deploy.
-docker compose -f "$COMPOSE_FILE" down
-
-log "2/5  Pulling the latest images"
+log "1/4  Pulling the latest images (no downtime - containers keep running)"
 docker compose -f "$COMPOSE_FILE" pull
 
-log "3/5  Starting the new stack"
-docker compose -f "$COMPOSE_FILE" up -d
+log "2/4  Recreating only the containers whose image changed"
+# `up -d` recreates containers whose image/config changed and leaves the rest
+# running, so unchanged services (and the gateway) stay up during the deploy.
+docker compose -f "$COMPOSE_FILE" up -d --remove-orphans
 
-log "4/5  Waiting for the api-gateway to become healthy"
+log "3/4  Waiting for the api-gateway to become healthy"
 GATEWAY_URL="http://localhost:3001/health"
 READY=0
 for i in $(seq 1 60); do
@@ -99,7 +96,7 @@ if [ "$READY" -ne 1 ]; then
   exit 1
 fi
 
-log "5/5  Ensuring the nightly backup is scheduled"
+log "4/4  Ensuring the nightly backup is scheduled"
 install_backup_cron
 
 log "Running a backup now (so this deploy is always recoverable)"
