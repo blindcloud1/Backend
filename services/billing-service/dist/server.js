@@ -12,6 +12,7 @@ const mongodb_1 = require("mongodb");
 const crypto_1 = __importDefault(require("crypto"));
 const stripe_1 = __importDefault(require("stripe"));
 const event_bus_1 = require("@blindscloud/event-bus");
+const connect_1 = require("./connect");
 dotenv_1.default.config();
 const PORT = parseInt(process.env.PORT || '4008', 10);
 const JWT_SECRET = process.env.JWT_SECRET || '';
@@ -780,6 +781,8 @@ app.get('/payments', authenticate, requireAdmin, async (req, res) => {
     const payments = await paymentsCollection().find(filter).sort({ paymentDate: -1 }).toArray();
     res.json(payments.map(toPaymentResponse));
 });
+// Stripe Connect job-payment ledger. Separate from subscription billing above.
+app.use('/connect', (0, connect_1.createConnectRouter)({ mongo, stripe, authenticate, requireAdmin, frontendUrl: FRONTEND_URL }));
 app.post('/payments', authenticate, requireAdmin, [(0, express_validator_1.body)('userId').isLength({ min: 1 }), (0, express_validator_1.body)('amount').isNumeric(), (0, express_validator_1.body)('status').isString()], async (req, res) => {
     const errors = (0, express_validator_1.validationResult)(req);
     if (!errors.isEmpty())

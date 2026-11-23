@@ -7,6 +7,7 @@ import { MongoClient } from 'mongodb';
 import crypto from 'crypto';
 import Stripe from 'stripe';
 import { EventBus, type CloudEvent } from '@blindscloud/event-bus';
+import { createConnectRouter } from './connect';
 import type {
   CustomPlanConfigDoc,
   PaymentHistoryDoc,
@@ -949,6 +950,9 @@ app.get('/payments', authenticate, requireAdmin, async (req: AuthRequest, res: R
   const payments = await paymentsCollection().find(filter).sort({ paymentDate: -1 }).toArray();
   res.json(payments.map(toPaymentResponse));
 });
+
+// Stripe Connect job-payment ledger. Separate from subscription billing above.
+app.use('/connect', createConnectRouter({ mongo, stripe, authenticate, requireAdmin, frontendUrl: FRONTEND_URL }));
 
 app.post(
   '/payments',

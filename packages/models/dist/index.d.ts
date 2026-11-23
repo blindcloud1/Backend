@@ -221,6 +221,64 @@ export type PaymentHistoryDoc = DbDocBase & {
     paymentDate: Date;
     createdAt: Date;
 };
+/** Stripe Connect customer payments made against BlindsCloud jobs. */
+export type ConnectPaymentStatus = 'awaiting_payment' | 'pending' | 'available' | 'paid_out' | 'refunded' | 'failed' | 'disputed';
+export type ConnectPaymentStage = 'measurement_deposit' | 'installation_final' | 'other';
+export type ConnectedAccountDoc = DbDocBase & DbTimestamps & {
+    businessId: string;
+    stripeAccountId: string;
+    country: string;
+    currency: string;
+    email?: string;
+    businessName?: string;
+    chargesEnabled: boolean;
+    payoutsEnabled: boolean;
+    requirementsCurrentlyDue: string[];
+    requirementsEventuallyDue: string[];
+    detailsSubmitted: boolean;
+    payoutDelayDays: number;
+};
+/** All money fields are integer pence. */
+export type JobPaymentDoc = DbDocBase & DbTimestamps & {
+    requestId: string;
+    businessId: string;
+    jobId: string;
+    customerId?: string;
+    customerName?: string;
+    stage: ConnectPaymentStage;
+    description: string;
+    amountPence: number;
+    applicationFeePence: number;
+    stripeFeePence: number;
+    netPence: number;
+    refundedPence: number;
+    currency: string;
+    status: ConnectPaymentStatus;
+    checkoutSessionId?: string;
+    paymentIntentId?: string;
+    chargeId?: string;
+    paidAt?: Date;
+    availableAt?: Date;
+    refundedAt?: Date;
+    failureCode?: string;
+};
+export type ConnectPayoutDoc = DbDocBase & DbTimestamps & {
+    businessId: string;
+    stripeAccountId: string;
+    stripePayoutId: string;
+    amountPence: number;
+    currency: string;
+    status: string;
+    arrivalDate?: Date;
+    failureCode?: string;
+    description?: string;
+};
+export type FinanceSettingsDoc = DbDocBase & DbTimestamps & {
+    commissionPercent: number;
+    commissionFixedPence: number;
+    holdDays: number;
+    currency: string;
+};
 export type PricingTableDoc = DbDocBase & DbTimestamps & {
     businessId: string;
     name: string;
