@@ -6,7 +6,7 @@ import jwt from 'jsonwebtoken';
 import { MongoClient } from 'mongodb';
 import crypto from 'crypto';
 import { EventBus, type CloudEvent } from '@blindscloud/event-bus';
-import type { PricingTableDoc, UserDoc, UserRole } from '@blindscloud/models';
+import type { BusinessDoc, PricingTableDoc, UserDoc, UserRole } from '@blindscloud/models';
 import {
   checkVisionRateLimit,
   extractPricingFromImage,
@@ -39,7 +39,10 @@ const eventBus = new EventBus({
 });
 
 const usersCollection = () => mongo.db('blindscloud').collection<UserDoc>('users');
+const businessesCollection = () => mongo.db('blindscloud').collection<BusinessDoc>('businesses');
 const pricingTablesCollection = () => mongo.db('blindscloud').collection<PricingTableDoc>('pricing_tables');
+
+const AI_ACCESS_MESSAGE = "You don't have access to this feature. Please contact our team to enable it.";
 
 const authenticate = (req: AuthRequest, res: Response, next: NextFunction) => {
   const header = req.header('authorization') || req.header('Authorization');
@@ -70,6 +73,33 @@ const getCurrentUser = async (req: AuthRequest): Promise<UserDoc | null> => {
 const canAccessBusiness = (role: string, currentUser: UserDoc, businessId: string): boolean => {
   if (role === 'admin') return true;
   return Boolean(currentUser.businessId && currentUser.businessId === businessId);
+};
+
+/**
+ * AI price extraction is a per-business opt-in feature. Admins always have
+ * access; business users only reach the pricing-table extractor when their
+ * business has the `ai_price_extraction` feature enabled.
+ */
+const requireAiPriceExtractionFeature = async (req: AuthRequest, res: Response, next: NextFunction) => {
+  const role = req.user?.role?.toLowerCase();
+  if (role === 'admin') return next();
+  if (role !== 'business') return res.status(403).json({ error: 'Insufficient permissions' });
+
+  try {
+    const currentUser = await getCurrentUser(req);
+    if (!currentUser?.businessId) {
+      return res.status(403).json({ error: AI_ACCESS_MESSAGE });
+    }
+    const business = await businessesCollection().findOne({ _id: currentUser.businessId } as any);
+    const features = Array.isArray(business?.features) ? business!.features.map(String) : [];
+    if (!features.includes('ai_price_extraction')) {
+      return res.status(403).json({ error: AI_ACCESS_MESSAGE });
+    }
+    return next();
+  } catch (error: any) {
+    console.error('AI feature check failed', error?.message || error);
+    return res.status(500).json({ error: 'Unable to verify AI access' });
+  }
 };
 
 const toPricingResponse = (t: PricingTableDoc) => ({
@@ -148,6 +178,7 @@ app.post(
   '/vision/pricing-extract',
   authenticate,
   requireAdminOrBusiness,
+  requireAiPriceExtractionFeature,
   visionUploadSingle,
   async (req: AuthRequest, res: Response) => {
     const file = runVisionChecks(req, res);

@@ -30,6 +30,8 @@ interface ConnectRouterDeps {
   authenticate: AuthFn;
   requireAdmin: AuthFn;
   frontendUrl: string;
+  connectWebhookSecret: string;
+  subscriptionWebhookSecret: string;
 }
 
 class ApiError extends Error {
@@ -186,7 +188,7 @@ const sumPence = (docs: any[], field: string): number =>
   docs.reduce((total, doc) => total + asPence(doc?.[field]), 0);
 
 export function createConnectRouter(deps: ConnectRouterDeps): Router {
-  const { mongo, stripe, authenticate, requireAdmin, frontendUrl } = deps;
+  const { mongo, stripe, authenticate, requireAdmin, frontendUrl, connectWebhookSecret, subscriptionWebhookSecret } = deps;
   const router = express.Router();
 
   const requireBusiness = (req: any, res: Response, next: NextFunction) => {
@@ -373,6 +375,204 @@ export function createConnectRouter(deps: ConnectRouterDeps): Router {
     }
 
     return { paymentsUpdated, payoutsUpdated, accountsChecked: accounts.length };
+  };
+
+  // ---------------------------------------------------------------------------
+  // Stripe webhook handling (separate from the subscription webhook in server.ts)
+  // ---------------------------------------------------------------------------
+
+  if (!connectWebhookSecret && subscriptionWebhookSecret) {
+    console.warn('[connect] STRIPE_CONNECT_WEBHOOK_SECRET is not set; using STRIPE_WEBHOOK_SECRET as fallback');
+  }
+
+  const findPaymentForStripeObject = async (obj: any): Promise<any | null> => {
+    const requestId = String(obj?.metadata?.requestId || '');
+    if (requestId) {
+      const byRequest = await paymentsCol(mongo).findOne({ requestId } as any);
+      if (byRequest) return byRequest;
+    }
+    const intent = obj?.payment_intent;
+    const intentId = typeof intent === 'string' ? intent : intent?.id;
+    if (intentId) {
+      const byIntent = await paymentsCol(mongo).findOne({ paymentIntentId: intentId } as any);
+      if (byIntent) return byIntent;
+    }
+    const charge = obj?.charge;
+    const chargeId = typeof charge === 'string' ? charge : charge?.id || (obj?.object === 'charge' ? obj?.id : '');
+    if (chargeId) {
+      const byCharge = await paymentsCol(mongo).findOne({ chargeId } as any);
+      if (byCharge) return byCharge;
+    }
+    return null;
+  };
+
+  const getBalanceInfo = async (paymentIntentId: string) => {
+    let chargeId = '';
+    let stripeFeePence = 0;
+    let availableAt: Date | undefined;
+    if (!stripe || !paymentIntentId) return { chargeId, stripeFeePence, availableAt };
+    try {
+      const intent: any = await stripe.paymentIntents.retrieve(paymentIntentId, { expand: ['latest_charge'] } as any);
+      let charge: any = intent?.latest_charge;
+      if (typeof charge === 'string') charge = await stripe.charges.retrieve(charge);
+      chargeId = charge?.id ? String(charge.id) : '';
+
+      let balanceTransaction: any = charge?.balance_transaction;
+      if (typeof balanceTransaction === 'string') {
+        balanceTransaction = await stripe.balanceTransactions.retrieve(balanceTransaction);
+      }
+      if (!balanceTransaction && chargeId) {
+        const fullCharge: any = await stripe.charges.retrieve(chargeId, { expand: ['balance_transaction'] } as any);
+        balanceTransaction = fullCharge?.balance_transaction;
+        if (typeof balanceTransaction === 'string') {
+          balanceTransaction = await stripe.balanceTransactions.retrieve(balanceTransaction);
+        }
+      }
+      stripeFeePence = asPence(balanceTransaction?.fee);
+      if (balanceTransaction?.available_on) {
+        availableAt = new Date(Number(balanceTransaction.available_on) * 1000);
+      }
+    } catch (error: any) {
+      console.error('[connect] balance lookup failed', paymentIntentId, error?.message);
+    }
+    return { chargeId, stripeFeePence, availableAt };
+  };
+
+  const handleCheckoutCompleted = async (session: any) => {
+    if (String(session?.payment_status || '') !== 'paid') return;
+    const sessionId = String(session?.id || '');
+    let payment = await findPaymentForStripeObject(session);
+    if (!payment && sessionId) {
+      payment = await paymentsCol(mongo).findOne({ checkoutSessionId: sessionId } as any);
+    }
+    if (!payment || String(payment.status) !== 'awaiting_payment') return;
+
+    const intent = session.payment_intent;
+    const paymentIntentId = typeof intent === 'string' ? intent : intent?.id || '';
+    const balance = await getBalanceInfo(paymentIntentId);
+    const settings = await getSettings();
+    const paidAt = new Date();
+    const availableAt = balance.availableAt || new Date(paidAt.getTime() + clamp(settings.holdDays, 0, 31) * HOLD_DAY_MS);
+    const grossPence = asPence(payment.amountPence);
+    const commissionPence = asPence(payment.applicationFeePence);
+
+    await paymentsCol(mongo).updateOne({ _id: payment._id }, {
+      $set: {
+        status: 'pending',
+        paymentIntentId: paymentIntentId || null,
+        chargeId: balance.chargeId || null,
+        stripeFeePence: balance.stripeFeePence,
+        netPence: Math.max(0, grossPence - commissionPence - balance.stripeFeePence),
+        paidAt,
+        availableAt,
+        failureCode: null,
+        updatedAt: paidAt
+      }
+    });
+  };
+
+  const handleCheckoutExpired = async (session: any) => {
+    const sessionId = String(session?.id || '');
+    let payment = await findPaymentForStripeObject(session);
+    if (!payment && sessionId) {
+      payment = await paymentsCol(mongo).findOne({ checkoutSessionId: sessionId } as any);
+    }
+    if (!payment || String(payment.status) !== 'awaiting_payment') return;
+    await paymentsCol(mongo).updateOne({ _id: payment._id }, {
+      $set: { status: 'failed', failureCode: 'checkout_expired', updatedAt: new Date() }
+    });
+  };
+
+  const handleChargeRefunded = async (charge: any) => {
+    const payment = await findPaymentForStripeObject(charge);
+    if (!payment) return;
+    const refundedPence = asPence(charge?.amount_refunded);
+    const grossPence = asPence(payment.amountPence);
+    await paymentsCol(mongo).updateOne({ _id: payment._id }, {
+      $set: {
+        refundedPence,
+        status: refundedPence >= grossPence ? 'refunded' : payment.status,
+        refundedAt: refundedPence > 0 ? new Date() : null,
+        updatedAt: new Date()
+      }
+    });
+  };
+
+  const handleAccountUpdated = async (event: Stripe.Event) => {
+    const stripeAccountId = String(event.account || '');
+    if (!stripeAccountId) return;
+    const record = await accountsCol(mongo).findOne({ stripeAccountId } as any);
+    if (!record) return;
+    const account: any = event.data.object;
+    const schedule = account?.settings?.payouts?.schedule;
+    await accountsCol(mongo).updateOne({ _id: record._id }, {
+      $set: {
+        chargesEnabled: !!account.charges_enabled,
+        payoutsEnabled: !!account.payouts_enabled,
+        detailsSubmitted: !!account.details_submitted,
+        requirementsCurrentlyDue: account?.requirements?.currently_due || [],
+        requirementsEventuallyDue: account?.requirements?.eventually_due || [],
+        payoutDelayDays: Number(schedule?.delay_days ?? record.payoutDelayDays ?? 7),
+        updatedAt: new Date()
+      }
+    });
+  };
+
+  const handlePayoutEvent = async (event: Stripe.Event) => {
+    const stripeAccountId = String(event.account || '');
+    if (!stripeAccountId) return;
+    const record = await accountsCol(mongo).findOne({ stripeAccountId } as any);
+    if (!record) return;
+    const payout: any = event.data.object;
+    const now = new Date();
+    await payoutsCol(mongo).updateOne({ stripePayoutId: String(payout.id) }, {
+      $set: {
+        businessId: record.businessId,
+        stripeAccountId,
+        stripePayoutId: String(payout.id),
+        amountPence: asPence(payout.amount),
+        currency: String(payout.currency || 'gbp').toUpperCase(),
+        status: String(payout.status || 'pending'),
+        arrivalDate: payout.arrival_date ? new Date(Number(payout.arrival_date) * 1000) : null,
+        failureCode: payout.failure_code || null,
+        description: payout.description || null,
+        updatedAt: now
+      },
+      $setOnInsert: { _id: crypto.randomUUID(), createdAt: now }
+    }, { upsert: true });
+
+    if (event.type === 'payout.paid') {
+      const paidDate = payout.created ? new Date(Number(payout.created) * 1000) : now;
+      await paymentsCol(mongo).updateMany({
+        businessId: record.businessId,
+        status: 'pending',
+        availableAt: { $lte: paidDate }
+      } as any, { $set: { status: 'paid_out', updatedAt: now } });
+    }
+  };
+
+  const handleDisputeEvent = async (event: Stripe.Event) => {
+    const dispute: any = event.data.object;
+    const payment = await findPaymentForStripeObject(dispute);
+    if (!payment) return;
+    if (event.type === 'charge.dispute.created') {
+      await paymentsCol(mongo).updateOne({ _id: payment._id }, {
+        $set: { status: 'disputed', failureCode: dispute.reason || 'dispute', updatedAt: new Date() }
+      });
+      return;
+    }
+    if (event.type === 'charge.dispute.closed') {
+      const won = String(dispute.status || '') === 'won';
+      const availableAt = payment.availableAt ? new Date(payment.availableAt).getTime() : NaN;
+      const restoredStatus = Number.isFinite(availableAt) && availableAt <= Date.now() ? 'available' : 'pending';
+      await paymentsCol(mongo).updateOne({ _id: payment._id }, {
+        $set: {
+          status: won ? restoredStatus : 'disputed',
+          failureCode: won ? null : dispute.reason || 'dispute_lost',
+          updatedAt: new Date()
+        }
+      });
+    }
   };
 
   // ---------------------------------------------------------------------------
@@ -750,6 +950,56 @@ export function createConnectRouter(deps: ConnectRouterDeps): Router {
   router.post('/admin/sync', authenticate, requireAdmin, wrap(async (_req, res) => {
     return res.json(await syncLedger());
   }));
+
+  router.post('/webhook', async (req: any, res: Response) => {
+    const secret = connectWebhookSecret || subscriptionWebhookSecret;
+    if (!stripe || !secret) {
+      return res.status(500).send('Stripe Connect webhook not configured');
+    }
+
+    const signature = req.header('stripe-signature');
+    if (!signature) return res.status(400).send('Missing stripe-signature');
+
+    let event: Stripe.Event;
+    try {
+      event = stripe.webhooks.constructEvent(req.rawBody, signature, secret);
+    } catch (error: any) {
+      return res.status(400).send(`Webhook Error: ${error?.message || String(error)}`);
+    }
+
+    try {
+      switch (event.type) {
+        case 'checkout.session.completed':
+          await handleCheckoutCompleted(event.data.object as any);
+          break;
+        case 'checkout.session.expired':
+          await handleCheckoutExpired(event.data.object as any);
+          break;
+        case 'charge.refunded':
+          await handleChargeRefunded(event.data.object as any);
+          break;
+        case 'account.updated':
+          await handleAccountUpdated(event);
+          break;
+        case 'payout.created':
+        case 'payout.updated':
+        case 'payout.paid':
+        case 'payout.failed':
+          await handlePayoutEvent(event);
+          break;
+        case 'charge.dispute.created':
+        case 'charge.dispute.closed':
+          await handleDisputeEvent(event);
+          break;
+        default:
+          break;
+      }
+      return res.json({ received: true });
+    } catch (error: any) {
+      console.error('[connect] webhook handler failed', event.type, error?.message || error);
+      return res.status(500).send('Webhook handler failed');
+    }
+  });
 
   router.use((error: any, _req: Request, res: Response, _next: NextFunction) => {
     const status = Number(error?.status) || 500;

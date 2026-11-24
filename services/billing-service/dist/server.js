@@ -21,6 +21,7 @@ const RABBITMQ_URL = process.env.RABBITMQ_URL || '';
 const EVENT_EXCHANGE = process.env.EVENT_EXCHANGE || 'blindscloud.events';
 const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY || '';
 const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET || '';
+const STRIPE_CONNECT_WEBHOOK_SECRET = process.env.STRIPE_CONNECT_WEBHOOK_SECRET || '';
 const FRONTEND_URL = process.env.FRONTEND_URL || '';
 if (!JWT_SECRET)
     throw new Error('JWT_SECRET is required');
@@ -782,7 +783,15 @@ app.get('/payments', authenticate, requireAdmin, async (req, res) => {
     res.json(payments.map(toPaymentResponse));
 });
 // Stripe Connect job-payment ledger. Separate from subscription billing above.
-app.use('/connect', (0, connect_1.createConnectRouter)({ mongo, stripe, authenticate, requireAdmin, frontendUrl: FRONTEND_URL }));
+app.use('/connect', (0, connect_1.createConnectRouter)({
+    mongo,
+    stripe,
+    authenticate,
+    requireAdmin,
+    frontendUrl: FRONTEND_URL,
+    connectWebhookSecret: STRIPE_CONNECT_WEBHOOK_SECRET,
+    subscriptionWebhookSecret: STRIPE_WEBHOOK_SECRET
+}));
 app.post('/payments', authenticate, requireAdmin, [(0, express_validator_1.body)('userId').isLength({ min: 1 }), (0, express_validator_1.body)('amount').isNumeric(), (0, express_validator_1.body)('status').isString()], async (req, res) => {
     const errors = (0, express_validator_1.validationResult)(req);
     if (!errors.isEmpty())

@@ -31,7 +31,9 @@ const eventBus = new event_bus_1.EventBus({
     serviceName: 'pricing-service'
 });
 const usersCollection = () => mongo.db('blindscloud').collection('users');
+const businessesCollection = () => mongo.db('blindscloud').collection('businesses');
 const pricingTablesCollection = () => mongo.db('blindscloud').collection('pricing_tables');
+const AI_ACCESS_MESSAGE = "You don't have access to this feature. Please contact our team to enable it.";
 const authenticate = (req, res, next) => {
     const header = req.header('authorization') || req.header('Authorization');
     if (!header)
@@ -62,6 +64,34 @@ const canAccessBusiness = (role, currentUser, businessId) => {
         return true;
     return Boolean(currentUser.businessId && currentUser.businessId === businessId);
 };
+/**
+ * AI price extraction is a per-business opt-in feature. Admins always have
+ * access; business users only reach the pricing-table extractor when their
+ * business has the `ai_price_extraction` feature enabled.
+ */
+const requireAiPriceExtractionFeature = async (req, res, next) => {
+    const role = req.user?.role?.toLowerCase();
+    if (role === 'admin')
+        return next();
+    if (role !== 'business')
+        return res.status(403).json({ error: 'Insufficient permissions' });
+    try {
+        const currentUser = await getCurrentUser(req);
+        if (!currentUser?.businessId) {
+            return res.status(403).json({ error: AI_ACCESS_MESSAGE });
+        }
+        const business = await businessesCollection().findOne({ _id: currentUser.businessId });
+        const features = Array.isArray(business?.features) ? business.features.map(String) : [];
+        if (!features.includes('ai_price_extraction')) {
+            return res.status(403).json({ error: AI_ACCESS_MESSAGE });
+        }
+        return next();
+    }
+    catch (error) {
+        console.error('AI feature check failed', error?.message || error);
+        return res.status(500).json({ error: 'Unable to verify AI access' });
+    }
+};
 const toPricingResponse = (t) => ({
     ...t,
     createdAt: t.createdAt.toISOString(),
@@ -70,6 +100,45 @@ const toPricingResponse = (t) => ({
 const app = (0, express_1.default)();
 app.use(express_1.default.json({ limit: '4mb' }));
 app.use((0, helmet_1.default)());
+/**
+ * Wraps the multer upload so file errors (too large, wrong field name) come
+ * back as a clean JSON error instead of Express's default HTML page.
+ */
+const visionUploadSingle = (req, res, next) => {
+    vision_1.visionUpload.single('file')(req, res, (err) => {
+        if (!err)
+            return next();
+        if (err?.code === 'LIMIT_FILE_SIZE') {
+            return res.status(413).json({ error: 'Image is too large. The maximum size is 8 MB.' });
+        }
+        return res.status(400).json({ error: err?.message || 'Invalid image upload.' });
+    });
+};
+/**
+ * Shared checks for the /vision/* extraction endpoints: config check, file
+ * check and per-user rate limit. Returns the uploaded file, or `undefined`
+ * after having already sent the error response.
+ */
+const runVisionChecks = (req, res) => {
+    if (!(0, vision_1.isVisionConfigured)()) {
+        res.status(501).json({ error: 'AI extraction is not configured on this server' });
+        return undefined;
+    }
+    const file = req.file;
+    if (!file) {
+        res.status(400).json({ error: 'No image file provided' });
+        return undefined;
+    }
+    const rate = (0, vision_1.checkVisionRateLimit)(req.user.id);
+    if (!rate.ok) {
+        res.setHeader('Retry-After', String(rate.retryAfterSeconds));
+        res.status(429).json({
+            error: `Too many AI extractions. Please wait ${rate.retryAfterSeconds}s and try again.`
+        });
+        return undefined;
+    }
+    return file;
+};
 app.get('/health', async (_req, res) => {
     try {
         await mongo.db('admin').command({ ping: 1 });
@@ -89,21 +158,10 @@ app.get('/health', async (_req, res) => {
  *   table - the fully structured table (name, unit, widths, drops, matrix)
  *          which the UI can apply to the grid in one click
  */
-app.post('/vision/pricing-extract', authenticate, requireAdminOrBusiness, vision_1.visionUpload.single('file'), async (req, res) => {
-    if (!(0, vision_1.isVisionConfigured)()) {
-        return res.status(501).json({ error: 'AI extraction is not configured on this server' });
-    }
-    const file = req.file;
-    if (!file) {
-        return res.status(400).json({ error: 'No image file provided' });
-    }
-    const rate = (0, vision_1.checkVisionRateLimit)(req.user.id);
-    if (!rate.ok) {
-        res.setHeader('Retry-After', String(rate.retryAfterSeconds));
-        return res.status(429).json({
-            error: `Too many AI extractions. Please wait ${rate.retryAfterSeconds}s and try again.`
-        });
-    }
+app.post('/vision/pricing-extract', authenticate, requireAdminOrBusiness, requireAiPriceExtractionFeature, visionUploadSingle, async (req, res) => {
+    const file = runVisionChecks(req, res);
+    if (!file)
+        return;
     const result = await (0, vision_1.extractPricingFromImage)(file.buffer, file.mimetype);
     if (!result.ok) {
         return res.status(result.status).json({ error: result.error });
@@ -131,6 +189,39 @@ app.post('/vision/pricing-extract', authenticate, requireAdminOrBusiness, vision
             priceMatrix: table.priceMatrix
         }
     });
+});
+/**
+ * AI product extraction (product page "Use AI"). Accepts a single image of a
+ * product catalog/flyer and returns the extracted products as an editable row
+ * list plus a properly quoted CSV block:
+ *   products - [{ name, category, price, vatPercentage, description, specifications[] }]
+ *   csv      - name,category,price,vat_percentage,description,specifications
+ */
+app.post('/vision/product-extract', authenticate, requireAdminOrBusiness, visionUploadSingle, async (req, res) => {
+    const file = runVisionChecks(req, res);
+    if (!file)
+        return;
+    const result = await (0, vision_1.extractProductsFromImage)(file.buffer, file.mimetype);
+    if (!result.ok) {
+        return res.status(result.status).json({ error: result.error });
+    }
+    return res.json({ products: result.products, csv: result.csv });
+});
+/**
+ * AI specification extraction (product form "Use AI" next to + Add
+ * Specification). Returns one entry per bullet/line found in the image:
+ *   specifications - string[]
+ *   csv            - one quoted field per line
+ */
+app.post('/vision/specification-extract', authenticate, requireAdminOrBusiness, visionUploadSingle, async (req, res) => {
+    const file = runVisionChecks(req, res);
+    if (!file)
+        return;
+    const result = await (0, vision_1.extractSpecificationsFromImage)(file.buffer, file.mimetype);
+    if (!result.ok) {
+        return res.status(result.status).json({ error: result.error });
+    }
+    return res.json({ specifications: result.specifications, csv: result.csv });
 });
 app.get('/pricing-tables', authenticate, async (req, res) => {
     const role = req.user.role.toLowerCase();
